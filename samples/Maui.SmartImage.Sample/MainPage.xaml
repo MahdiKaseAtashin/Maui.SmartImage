@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:controls="clr-namespace:Maui.SmartImage.Controls;assembly=Maui.SmartImage"
+             xmlns:services="clr-namespace:Maui.SmartImage.Services;assembly=Maui.SmartImage"
+             x:Class="Maui.SmartImage.Sample.MainPage"
+             Title="Maui.SmartImage Sample">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="24" Spacing="28">
+
+            <Label Text="Maui.SmartImage" FontSize="24" FontAttributes="Bold" />
+
+            <!-- 1. Remote URL that fails, demonstrating the built-in retry overlay -->
+            <VerticalStackLayout Spacing="8">
+                <Label Text="1. Remote URL with retry-on-failure" FontAttributes="Bold" />
+                <Label Text="This URL is intentionally broken to demonstrate the Failed state and tappable retry overlay." FontSize="12" TextColor="Gray" />
+                <controls:SmartImage
+                    Source="https://this-host-does-not-exist.invalid/broken.jpg"
+                    HeightRequest="160"
+                    Aspect="AspectFit"
+                    MaxRetryCount="1"
+                    RetryDelay="00:00:01" />
+            </VerticalStackLayout>
+
+            <!-- 2. Local resource, bypasses the network entirely -->
+            <VerticalStackLayout Spacing="8">
+                <Label Text="2. Local resource (no network involved)" FontAttributes="Bold" />
+                <controls:SmartImage
+                    Source="dotnet_bot.png"
+                    HeightRequest="160"
+                    Aspect="AspectFit" />
+            </VerticalStackLayout>
+
+            <!-- 3. Same remote URL under different cache policies -->
+            <VerticalStackLayout Spacing="8">
+                <Label Text="3. CachePolicy values" FontAttributes="Bold" />
+                <Label Text="Same remote image loaded three times with different CachePolicy settings." FontSize="12" TextColor="Gray" />
+                <HorizontalStackLayout Spacing="12">
+                    <VerticalStackLayout Spacing="4" WidthRequest="100">
+                        <Label Text="None" FontSize="12" HorizontalOptions="Center" />
+                        <controls:SmartImage
+                            Source="https://picsum.photos/seed/smartimage1/300"
+                            HeightRequest="100"
+                            WidthRequest="100"
+                            Aspect="AspectFill"
+                            CachePolicy="None" />
+                    </VerticalStackLayout>
+                    <VerticalStackLayout Spacing="4" WidthRequest="100">
+                        <Label Text="Memory" FontSize="12" HorizontalOptions="Center" />
+                        <controls:SmartImage
+                            Source="https://picsum.photos/seed/smartimage2/300"
+                            HeightRequest="100"
+                            WidthRequest="100"
+                            Aspect="AspectFill"
+                            CachePolicy="Memory" />
+                    </VerticalStackLayout>
+                    <VerticalStackLayout Spacing="4" WidthRequest="100">
+                        <Label Text="MemoryAndDisk" FontSize="12" HorizontalOptions="Center" />
+                        <controls:SmartImage
+                            Source="https://picsum.photos/seed/smartimage3/300"
+                            HeightRequest="100"
+                            WidthRequest="100"
+                            Aspect="AspectFill"
+                            CachePolicy="MemoryAndDisk" />
+                    </VerticalStackLayout>
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+
+            <!-- 4. KeepPreviousImageWhileLoading toggle -->
+            <VerticalStackLayout Spacing="8">
+                <Label Text="4. KeepPreviousImageWhileLoading" FontAttributes="Bold" />
+                <Label Text="Tap 'Load next image' repeatedly and compare behavior with the switch on/off." FontSize="12" TextColor="Gray" />
+                <HorizontalStackLayout Spacing="8">
+                    <Label Text="Keep previous image while loading:" VerticalOptions="Center" />
+                    <Switch x:Name="KeepPreviousSwitch" Toggled="OnKeepPreviousToggled" />
+                </HorizontalStackLayout>
+                <controls:SmartImage
+                    x:Name="CycleImage"
+                    HeightRequest="160"
+                    Aspect="AspectFit"
+                    Placeholder="dotnet_bot.png" />
+                <Button Text="Load next image" Clicked="OnLoadNextImageClicked" />
+            </VerticalStackLayout>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>
