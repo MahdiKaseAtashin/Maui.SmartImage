@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<ContentView
+    x:Class="Maui.SmartImage.Controls.SmartImage"
+    x:Name="View"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
+    <Grid>
+        <Image
+            x:Name="PART_Image"
+            Aspect="AspectFill"
+            HorizontalOptions="Fill"
+            VerticalOptions="Fill" />
+
+        <Grid
+            x:Name="PART_SkeletonOverlay"
+            IsClippedToBounds="True"
+            BackgroundColor="{Binding SkeletonColor, Source={x:Reference View}}"
+            IsVisible="{Binding IsLoading, Source={x:Reference View}}">
+            <BoxView
+                x:Name="PART_ShimmerHighlight"
+                WidthRequest="80"
+                HorizontalOptions="Start"
+                VerticalOptions="Fill">
+                <BoxView.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                        <GradientStop Offset="0.0" Color="Transparent" />
+                        <GradientStop Offset="0.5" Color="{Binding SkeletonHighlightColor, Source={x:Reference View}}" />
+                        <GradientStop Offset="1.0" Color="Transparent" />
+                    </LinearGradientBrush>
+                </BoxView.Background>
+            </BoxView>
+        </Grid>
+
+        <Border
+            x:Name="PART_RetryOverlay"
+            HorizontalOptions="Center"
+            VerticalOptions="Center"
+            Padding="12,6"
+            BackgroundColor="{Binding RetryOverlayBackgroundColor, Source={x:Reference View}}"
+            StrokeShape="RoundRectangle 6"
+            StrokeThickness="0"
+            IsVisible="{Binding IsFailed, Source={x:Reference View}}">
+            <Border.GestureRecognizers>
+                <TapGestureRecognizer Command="{Binding RetryCommand, Source={x:Reference View}}" />
+            </Border.GestureRecognizers>
+            <Label
+                Text="{Binding RetryButtonText, Source={x:Reference View}}"
+                FontSize="{Binding RetryButtonFontSize, Source={x:Reference View}}"
+                TextColor="{Binding RetryButtonTextColor, Source={x:Reference View}}" />
+        </Border>
+    </Grid>
+</ContentView>
