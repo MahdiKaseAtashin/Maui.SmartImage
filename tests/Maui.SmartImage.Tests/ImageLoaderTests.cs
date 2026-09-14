@@ -317,6 +317,32 @@ public class ImageLoaderTests
     }
 
     [Fact]
+    public async Task LoadAsync_WithConcurrentRequestsForSameUrlButDifferentSettings_DownloadsIndependently()
+    {
+        TaskCompletionSource gate = new();
+        FakeHttpMessageHandler handler = new(async (_, ct) =>
+        {
+            await gate.Task.WaitAsync(ct);
+            return SuccessResponse(ValidPngBytes);
+        });
+        ImageLoader loader = CreateLoader(handler);
+        ImageLoadRequest smallCapRequest = new() { Url = ImageUrl, MaxImageSizeBytes = 1, EnableAutomaticRetry = false };
+        ImageLoadRequest noCapRequest = new() { Url = ImageUrl, MaxImageSizeBytes = null, EnableAutomaticRetry = false };
+
+        Task<ImageLoadResult> smallCapCall = loader.LoadAsync(smallCapRequest, CancellationToken.None);
+        Task<ImageLoadResult> noCapCall = loader.LoadAsync(noCapRequest, CancellationToken.None);
+
+        await Task.Delay(50);
+        gate.SetResult();
+
+        ImageLoadResult[] results = await Task.WhenAll(smallCapCall, noCapCall);
+
+        handler.CallCount.Should().Be(2);
+        results[0].ErrorKind.Should().Be(ImageLoadErrorKind.TooLarge);
+        results[1].IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task LoadAsync_WhenCallerCancelsWhileWaiting_ThrowsWithoutFailingTheSharedDownload()
     {
         TaskCompletionSource gate = new();

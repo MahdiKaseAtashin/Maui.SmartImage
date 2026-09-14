@@ -37,20 +37,18 @@ public sealed class ImageLoader : IImageLoader
             }
         }
 
-        // The shared download is intentionally NOT tied to any single caller's CancellationToken:
-        // multiple SmartImage instances may be awaiting the same URL, and one caller cancelling
-        // (e.g. its Source changed) must not abort the download for the others. Each caller instead
-        // stops *waiting* on its own token via WaitAsync below, while the shared download keeps running.
+        string inFlightKey = BuildInFlightKey(request);
+
         Lazy<Task<ImageLoadResult>> lazyDownload = _inFlightDownloads.GetOrAdd(
-            cacheKey,
+            inFlightKey,
             _ => new Lazy<Task<ImageLoadResult>>(
-                () => DownloadWithRetryAsync(request, uri, cacheKey),
+                () => DownloadWithRetryAsync(request, uri, cacheKey, inFlightKey),
                 LazyThreadSafetyMode.ExecutionAndPublication));
 
         return await lazyDownload.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<ImageLoadResult> DownloadWithRetryAsync(ImageLoadRequest request, Uri uri, string cacheKey)
+    private async Task<ImageLoadResult> DownloadWithRetryAsync(ImageLoadRequest request, Uri uri, string cacheKey, string inFlightKey)
     {
         try
         {
@@ -93,8 +91,21 @@ public sealed class ImageLoader : IImageLoader
         }
         finally
         {
-            _inFlightDownloads.TryRemove(cacheKey, out _);
+            _inFlightDownloads.TryRemove(inFlightKey, out _);
         }
+    }
+
+    private static string BuildInFlightKey(ImageLoadRequest request)
+    {
+        return string.Join(
+            '|',
+            request.Url,
+            request.CachePolicy,
+            request.Timeout,
+            request.MaxImageSizeBytes,
+            request.MaxRetryCount,
+            request.EnableAutomaticRetry,
+            request.RetryDelay);
     }
 
     private async Task<ImageLoadResult> DownloadOnceAsync(ImageLoadRequest request, Uri uri)
