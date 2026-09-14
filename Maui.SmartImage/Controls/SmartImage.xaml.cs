@@ -306,12 +306,10 @@ public partial class SmartImage : ContentView
     {
         base.OnHandlerChanged();
 
-        if (Handler is not null && _imageLoader is null)
+        if (Handler is not null)
         {
-            _imageLoader = Handler.MauiContext?.Services.GetService<IImageLoader>();
+            _imageLoader ??= Handler.MauiContext?.Services.GetService<IImageLoader>();
 
-            // Source may have already been set (e.g. via a binding) before this control had a Handler,
-            // in which case the earlier load attempt was deferred. Re-run it now that the loader is available.
             if (_imageLoader is not null)
             {
                 OnSourceChanged(Source);
