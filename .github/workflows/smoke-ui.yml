@@ -255,9 +255,21 @@ jobs:
           # Emit a clean device name only (no UDID / parentheses).
           NAME=$(xcrun simctl list devices available | grep -oE 'iPhone [^(:]+' | head -n 1 | sed 's/[[:space:]]*$//')
           if [ -z "$NAME" ]; then NAME="iPhone 16"; fi
+          UDID=$(xcrun simctl list devices available | grep "$NAME (" | grep -oE '[A-F0-9-]{36}' | head -n 1)
           echo "device=$NAME" >> "$GITHUB_OUTPUT"
-          echo "Using simulator: $NAME"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Using simulator: $NAME ($UDID)"
           xcrun simctl list devices available | head -n 40
+
+      - name: Boot iOS simulator
+        run: |
+          UDID="${{ steps.sim.outputs.udid }}"
+          test -n "$UDID"
+          xcrun simctl boot "$UDID" || true
+          # Wait until SpringBoard is ready (Appium often fails if it has to cold-boot).
+          xcrun simctl bootstatus "$UDID" -b
+          open -a Simulator || true
+          sleep 5
 
       - name: Start Appium
         run: |
@@ -268,6 +280,7 @@ jobs:
         env:
           IOS_APP_PATH: ${{ steps.app.outputs.path }}
           IOS_DEVICE_NAME: ${{ steps.sim.outputs.device }}
+          IOS_UDID: ${{ steps.sim.outputs.udid }}
         run: |
           dotnet test tests/UITests/UITests.iOS/UITests.iOS.csproj -c Release --logger "trx;LogFileName=ios-smoke.trx"
 

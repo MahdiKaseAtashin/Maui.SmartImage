@@ -556,11 +556,47 @@ public partial class SmartImage : ContentView
         }
     }
 
+    private string? _automationIdBase;
+
     private void UpdateAutomationState()
     {
         string stateName = State.ToString();
         SemanticProperties.SetDescription(this, stateName);
         AutomationProperties.SetName(this, stateName);
+        AutomationProperties.SetHelpText(this, stateName);
+
+        // WinAppDriver often returns null for Name/Description; encode state in AutomationId
+        // so Appium can wait on AccessibilityId (e.g. Smoke.FailedRemote.Failed).
+        string? current = AutomationId;
+        if (string.IsNullOrEmpty(current) && string.IsNullOrEmpty(_automationIdBase))
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_automationIdBase))
+        {
+            _automationIdBase = StripStateSuffix(current!);
+        }
+
+        string desired = $"{_automationIdBase}.{stateName}";
+        if (!string.Equals(AutomationId, desired, StringComparison.Ordinal))
+        {
+            AutomationId = desired;
+        }
+    }
+
+    private static string StripStateSuffix(string automationId)
+    {
+        foreach (string name in Enum.GetNames<SmartImageState>())
+        {
+            string suffix = "." + name;
+            if (automationId.EndsWith(suffix, StringComparison.Ordinal))
+            {
+                return automationId[..^suffix.Length];
+            }
+        }
+
+        return automationId;
     }
 
     private void StartShimmer()

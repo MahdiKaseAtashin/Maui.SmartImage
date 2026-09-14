@@ -19,14 +19,15 @@ public class AppiumSetup
         AppiumSession.EnsureServer();
 
         // Without bundleId, Mac2 automates Finder instead of the Catalyst app.
+        // Use appPath (not only appium:app) so Mac2 launches the built .app by path.
         // See: https://learn.microsoft.com/dotnet/maui/deployment/ui-testing
         const string bundleId = "com.mahdi.smartimage.maui.sample";
 
         AppiumOptions options = new();
         options.PlatformName = "Mac";
         options.AutomationName = "Mac2";
-        options.App = appPath;
         options.AddAdditionalAppiumOption("bundleId", bundleId);
+        options.AddAdditionalAppiumOption("appPath", appPath);
         options.AddAdditionalAppiumOption("newCommandTimeout", 300);
         options.AddAdditionalAppiumOption("arguments", new[] { "--smoke" });
         options.AddAdditionalAppiumOption("showServerLogs", true);

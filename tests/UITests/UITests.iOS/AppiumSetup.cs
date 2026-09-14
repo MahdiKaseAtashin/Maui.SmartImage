@@ -28,11 +28,20 @@ public class AppiumSetup
         string? deviceName = Environment.GetEnvironmentVariable("IOS_DEVICE_NAME");
         options.DeviceName = string.IsNullOrWhiteSpace(deviceName) ? "iPhone 15" : deviceName;
 
+        string? udid = Environment.GetEnvironmentVariable("IOS_UDID");
+        if (!string.IsNullOrWhiteSpace(udid))
+        {
+            options.AddAdditionalAppiumOption("udid", udid);
+        }
+
         string? platformVersion = Environment.GetEnvironmentVariable("IOS_PLATFORM_VERSION");
         if (!string.IsNullOrWhiteSpace(platformVersion))
         {
             options.PlatformVersion = platformVersion;
         }
+
+        options.AddAdditionalAppiumOption("wdaLaunchTimeout", 180000);
+        options.AddAdditionalAppiumOption("wdaConnectionTimeout", 180000);
 
         AppiumSession.Driver = new IOSDriver(AppiumSession.ServerUri, options, TimeSpan.FromMinutes(5));
     }
