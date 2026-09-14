@@ -446,6 +446,18 @@ public partial class SmartImage : ContentView
     /// </summary>
     internal ImageSource? GetDisplayedSourceForTests() => PART_Image.Source;
 
+    /// <summary>State-probe AutomationId for UI smoke (unit tests).</summary>
+    internal string? GetStateProbeAutomationIdForTests() => null;
+
+    /// <summary>State-probe text for UI smoke (unit tests).</summary>
+    internal string? GetStateProbeTextForTests() => null;
+
+    /// <summary>Retry overlay AutomationId (unit tests).</summary>
+    internal string? GetRetryOverlayAutomationIdForTests() => PART_RetryOverlay.AutomationId;
+
+    /// <summary>Skeleton overlay AutomationId (unit tests).</summary>
+    internal string? GetSkeletonOverlayAutomationIdForTests() => PART_SkeletonOverlay.AutomationId;
+
     /// <inheritdoc />
     protected override void OnHandlerChanged()
     {
