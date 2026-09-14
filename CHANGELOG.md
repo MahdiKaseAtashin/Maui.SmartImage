@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-09-14
+
+### Fixed
+
+- Private memory cache so `ClearAsync` cannot wipe the host app's shared `IMemoryCache`
+- Stale fade/load races no longer leave incorrect `State` or image source
+- Concurrent disk writes use unique temp file names
+
+### Changed
+
+- Sample app branding aligned with package ID `SmartImage.Maui`
+
 ## [1.0.3] - 2026-09-14
 
 ### Changed
@@ -16,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - NuGet package ID is now `SmartImage.Maui` (`Maui.SmartImage` is reserved on nuget.org)
+
+## [1.0.1] - 2026-09-14
+
+### Removed
+
+- Unpublished attempt under reserved package ID `Maui.SmartImage` (nuget.org 409); superseded by `SmartImage.Maui` 1.0.2+
 
 ## [1.0.0] - 2026-09-14
 

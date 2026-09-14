@@ -8,7 +8,7 @@ namespace Maui.SmartImage.Services;
 /// <summary>
 /// Default <see cref="IImageCache"/> implementation using <see cref="IMemoryCache"/> and a disk directory.
 /// </summary>
-public sealed class ImageCache : IImageCache
+public sealed class ImageCache : IImageCache, IDisposable
 {
     private const string DataFileExtension = ".bin";
     private const string ExpiryFileExtension = ".exp";
@@ -19,6 +19,7 @@ public sealed class ImageCache : IImageCache
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _defaultEntryDuration;
     private readonly long _maxDiskCacheSizeBytes;
+    private readonly bool _ownsMemoryCache;
     private readonly object _diskEvictionLock = new();
 
     /// <summary>
@@ -29,18 +30,21 @@ public sealed class ImageCache : IImageCache
     /// <param name="timeProvider">Clock used for expiry checks (injectable for tests).</param>
     /// <param name="defaultEntryDuration">Applied when <c>duration</c> is null on set, and when promoting disk hits with no expiry sidecar.</param>
     /// <param name="maxDiskCacheSizeBytes">Soft size budget for the disk tier; oldest files are evicted when exceeded.</param>
+    /// <param name="ownsMemoryCache">When <see langword="true"/>, disposes <paramref name="memoryCache"/> with this instance.</param>
     public ImageCache(
         IMemoryCache memoryCache,
         string diskCacheDirectory,
         TimeProvider timeProvider,
         TimeSpan? defaultEntryDuration = null,
-        long? maxDiskCacheSizeBytes = null)
+        long? maxDiskCacheSizeBytes = null,
+        bool ownsMemoryCache = false)
     {
         _memoryCache = memoryCache;
         _diskCacheDirectory = diskCacheDirectory;
         _timeProvider = timeProvider;
         _defaultEntryDuration = defaultEntryDuration ?? TimeSpan.FromDays(7);
         _maxDiskCacheSizeBytes = maxDiskCacheSizeBytes ?? SmartImageOptions.DefaultMaxDiskCacheSizeBytes;
+        _ownsMemoryCache = ownsMemoryCache;
     }
 
     /// <inheritdoc />
@@ -108,7 +112,6 @@ public sealed class ImageCache : IImageCache
         string cacheKey = ComputeCacheKey(key);
         _memoryCache.Remove(cacheKey);
         DeleteDiskEntry(GetDataFilePath(cacheKey), GetExpiryFilePath(cacheKey));
-        TryDeleteFile(GetTempFilePath(cacheKey));
         return Task.CompletedTask;
     }
 
@@ -236,15 +239,34 @@ public sealed class ImageCache : IImageCache
 
             string dataPath = GetDataFilePath(cacheKey);
             string expiryPath = GetExpiryFilePath(cacheKey);
-            string tempPath = GetTempFilePath(cacheKey);
+            string tempPath = Path.Combine(
+                _diskCacheDirectory,
+                cacheKey + "." + Guid.NewGuid().ToString("N") + TempFileExtension);
 
-            await File.WriteAllBytesAsync(tempPath, data, cancellationToken).ConfigureAwait(false);
-            File.Move(tempPath, dataPath, overwrite: true);
+            try
+            {
+                await File.WriteAllBytesAsync(tempPath, data, cancellationToken).ConfigureAwait(false);
+                File.Move(tempPath, dataPath, overwrite: true);
+            }
+            finally
+            {
+                TryDeleteFile(tempPath);
+            }
 
             DateTimeOffset expiresAt = _timeProvider.GetUtcNow().Add(duration);
-            string expiryTempPath = expiryPath + ".tmp";
-            await File.WriteAllTextAsync(expiryTempPath, expiresAt.ToString("O"), cancellationToken).ConfigureAwait(false);
-            File.Move(expiryTempPath, expiryPath, overwrite: true);
+            string expiryTempPath = Path.Combine(
+                _diskCacheDirectory,
+                cacheKey + "." + Guid.NewGuid().ToString("N") + ExpiryFileExtension + TempFileExtension);
+
+            try
+            {
+                await File.WriteAllTextAsync(expiryTempPath, expiresAt.ToString("O"), cancellationToken).ConfigureAwait(false);
+                File.Move(expiryTempPath, expiryPath, overwrite: true);
+            }
+            finally
+            {
+                TryDeleteFile(expiryTempPath);
+            }
 
             EnforceDiskSizeBudget();
         }
@@ -272,7 +294,7 @@ public sealed class ImageCache : IImageCache
                 List<FileInfo> dataFiles = Directory
                     .EnumerateFiles(_diskCacheDirectory, "*" + DataFileExtension)
                     .Select(path => new FileInfo(path))
-                    .Where(info => info.Exists)
+                    .Where(info => info.Exists && IsDataFile(info.Name))
                     .OrderBy(info => info.LastWriteTimeUtc)
                     .ToList();
 
@@ -288,7 +310,6 @@ public sealed class ImageCache : IImageCache
                     string cacheKey = Path.GetFileNameWithoutExtension(file.Name);
                     long length = file.Length;
                     DeleteDiskEntry(file.FullName, GetExpiryFilePath(cacheKey));
-                    TryDeleteFile(GetTempFilePath(cacheKey));
                     totalSize -= length;
                 }
             }
@@ -303,6 +324,12 @@ public sealed class ImageCache : IImageCache
         }
     }
 
+    private static bool IsDataFile(string fileName)
+    {
+        // Real data files are "{sha256}.bin" (64 hex chars). Temp names contain extra dots.
+        return fileName.EndsWith(DataFileExtension, StringComparison.OrdinalIgnoreCase)
+            && fileName.Length == 64 + DataFileExtension.Length;
+    }
     private static void DeleteDiskEntry(string dataPath, string expiryPath)
     {
         TryDeleteFile(dataPath);
@@ -338,14 +365,18 @@ public sealed class ImageCache : IImageCache
         return Path.Combine(_diskCacheDirectory, cacheKey + ExpiryFileExtension);
     }
 
-    private string GetTempFilePath(string cacheKey)
-    {
-        return Path.Combine(_diskCacheDirectory, cacheKey + TempFileExtension);
-    }
-
     private static string ComputeCacheKey(string key)
     {
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(key));
         return Convert.ToHexStringLower(hash);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (_ownsMemoryCache && _memoryCache is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
     }
 }

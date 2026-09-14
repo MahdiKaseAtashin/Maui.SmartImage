@@ -28,10 +28,10 @@
 		<MauiXamlInflator>SourceGen</MauiXamlInflator>
 
 		<!-- Display name -->
-		<ApplicationTitle>Maui.SmartImage.Sample</ApplicationTitle>
+		<ApplicationTitle>SmartImage.Maui Sample</ApplicationTitle>
 
 		<!-- App Identifier -->
-		<ApplicationId>com.mahdi.maui.smartimage.sample</ApplicationId>
+		<ApplicationId>com.mahdi.smartimage.maui.sample</ApplicationId>
 
 		<!-- Versions -->
 		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>

@@ -4,12 +4,12 @@
              xmlns:controls="clr-namespace:Maui.SmartImage.Controls;assembly=Maui.SmartImage"
              xmlns:services="clr-namespace:Maui.SmartImage.Services;assembly=Maui.SmartImage"
              x:Class="Maui.SmartImage.Sample.MainPage"
-             Title="Maui.SmartImage Sample">
+             Title="SmartImage.Maui Sample">
 
     <ScrollView>
         <VerticalStackLayout Padding="24" Spacing="28">
 
-            <Label Text="Maui.SmartImage" FontSize="24" FontAttributes="Bold" />
+            <Label Text="SmartImage.Maui" FontSize="24" FontAttributes="Bold" />
 
             <!-- 1. Remote URL that fails, demonstrating the built-in retry overlay -->
             <VerticalStackLayout Spacing="8">

@@ -724,12 +724,14 @@ public partial class SmartImage : ContentView
 
     private async Task ApplyLoadedAsync(byte[] imageData, long generation)
     {
-        State = SmartImageState.Loaded;
-        Error = null;
+        if (!_guard.IsCurrent(generation) || Handler is null)
+        {
+            return;
+        }
 
         ImageSource loadedSource = ImageSource.FromStream(_ => Task.FromResult<Stream>(new MemoryStream(imageData)));
 
-        if (EnableFadeAnimation && Handler is not null)
+        if (EnableFadeAnimation)
         {
             try
             {
@@ -741,18 +743,31 @@ public partial class SmartImage : ContentView
                     return;
                 }
 
+                State = SmartImageState.Loaded;
+                Error = null;
                 PART_Image.Source = loadedSource;
                 await PART_Image.FadeToAsync(1, 150).ConfigureAwait(true);
             }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "SmartImage fade animation interrupted.");
+
+                if (!_guard.IsCurrent(generation) || Handler is null)
+                {
+                    PART_Image.Opacity = 1;
+                    return;
+                }
+
+                State = SmartImageState.Loaded;
+                Error = null;
                 PART_Image.Opacity = 1;
                 PART_Image.Source = loadedSource;
             }
         }
         else
         {
+            State = SmartImageState.Loaded;
+            Error = null;
             PART_Image.Source = loadedSource;
             PART_Image.Opacity = 1;
         }

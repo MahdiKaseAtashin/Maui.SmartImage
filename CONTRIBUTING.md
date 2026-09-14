@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Maui.SmartImage.
+Thanks for helping improve SmartImage.Maui.
 
 ## Prerequisites
 
