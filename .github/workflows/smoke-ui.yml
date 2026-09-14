@@ -165,6 +165,8 @@ jobs:
 
       # Avoid hardware profiles (e.g. pixel_6) — they commonly hang QEMU on GHA runners.
       # See: https://github.com/ReactiveCircus/android-emulator-runner/issues/431
+      # Use bash (not dash /bin/sh) — pipefail is not supported by dash.
+      # Use a large -skin so the smoke page fits on-screen without a device profile.
       - name: Run Android emulator + UI smoke
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -173,10 +175,11 @@ jobs:
           arch: x86_64
           force-avd-creation: true
           emulator-boot-timeout: 300
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -no-snapshot-save -camera-back none
+          ram-size: 2048
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -no-snapshot-save -camera-back none -skin 1080x1920
           disable-animations: true
           script: |
-            set -euo pipefail
+            bash -euo pipefail <<'EOF'
             appium --port ${{ env.APPIUM_PORT }} --log "$GITHUB_WORKSPACE/appium-android.log" --log-level info &
             for i in $(seq 1 30); do
               if curl -sf "http://127.0.0.1:${{ env.APPIUM_PORT }}/status" >/dev/null; then
@@ -191,6 +194,7 @@ jobs:
             adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
             adb install -r "$ANDROID_APP_PATH"
             timeout 10m dotnet test tests/UITests/UITests.Android/UITests.Android.csproj -c Release --logger "trx;LogFileName=android-smoke.trx"
+            EOF
 
       - name: Upload artifacts
         if: always()
