@@ -1,0 +1,31 @@
+changelog:
+  exclude:
+    labels:
+      - duplicate
+      - invalid
+      - wontfix
+      - dependencies
+  categories:
+    - title: Breaking changes
+      labels:
+        - breaking-change
+        - semver/major
+    - title: Features
+      labels:
+        - enhancement
+        - semver/minor
+    - title: Fixes
+      labels:
+        - bug
+        - semver/patch
+    - title: Packaging and CI
+      labels:
+        - area/packaging
+        - area/ci
+    - title: Documentation
+      labels:
+        - documentation
+        - area/docs
+    - title: Other
+      labels:
+        - "*"

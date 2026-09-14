@@ -1,0 +1,12 @@
+---
+description: SmartImage control, bindable properties, and load state
+globs: Maui.SmartImage/Controls/**
+alwaysApply: false
+---
+
+# Control
+
+- Keep bindable properties and `State` (`Idle` / `Loading` / `Loaded` / `Failed`) consistent with existing behavior.
+- UI updates on the UI thread. Use `LoadGenerationGuard` so stale loads cannot win races.
+- Local sources go through MAUI `Image`; remote sources go through `IImageLoader`.
+- Do not block the UI thread on HTTP or disk I/O.

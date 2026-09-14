@@ -1,0 +1,27 @@
+name: Documentation
+description: README, XML docs, sample, or changelog gap
+labels: [documentation, area/docs]
+body:
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options:
+        - README / NuGet readme
+        - XML docs on public API
+        - Sample app
+        - CHANGELOG
+        - Contributing / GitHub templates
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: gap
+    attributes:
+      label: What is missing or wrong
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested wording or example

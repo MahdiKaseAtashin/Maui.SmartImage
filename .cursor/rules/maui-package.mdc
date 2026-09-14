@@ -1,0 +1,12 @@
+---
+description: SmartImage.Maui public API and NuGet package conventions
+alwaysApply: true
+---
+
+# MAUI package
+
+- NuGet id is `SmartImage.Maui`. Assembly/project folder stays `Maui.SmartImage`.
+- Public members need XML docs. Prefer additive API; breaking changes need `breaking-change`, CHANGELOG, and a major bump.
+- Remote images require `UseSmartImage()`. Do not silently no-op that contract.
+- Keep cache private to this library (do not share the host `IMemoryCache` in a way that `ClearAsync` wipes the app).
+- Do not commit `bin/`, `obj/`, or `artifacts/`.

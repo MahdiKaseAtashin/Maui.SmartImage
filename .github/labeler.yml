@@ -1,0 +1,46 @@
+area/control:
+  - changed-files:
+      - any-glob-to-any-file: Maui.SmartImage/Controls/**
+
+area/cache:
+  - changed-files:
+      - any-glob-to-any-file:
+          - Maui.SmartImage/Services/ImageCache*
+          - Maui.SmartImage/Services/IImageCache.cs
+          - Maui.SmartImage/Services/ImageCachePolicy.cs
+
+area/loader:
+  - changed-files:
+      - any-glob-to-any-file:
+          - Maui.SmartImage/Services/ImageLoader*
+          - Maui.SmartImage/Services/IImageLoader.cs
+          - Maui.SmartImage/Services/ImageLoad*.cs
+          - Maui.SmartImage/Services/LoadGenerationGuard.cs
+          - Maui.SmartImage/Services/ImageSource*.cs
+
+area/sample:
+  - changed-files:
+      - any-glob-to-any-file: samples/**
+
+area/ci:
+  - changed-files:
+      - any-glob-to-any-file: .github/**
+
+area/docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.md"
+          - images/**
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.md"
+          - images/**
+
+area/packaging:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.csproj"
+          - Directory.Build.props
+          - .github/workflows/pack.yml

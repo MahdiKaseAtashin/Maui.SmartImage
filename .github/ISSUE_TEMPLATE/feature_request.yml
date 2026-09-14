@@ -1,0 +1,38 @@
+name: Feature request
+description: Propose a change to the public API or behavior
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Desired API or behavior. Include bindable properties, options, or DI if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: api
+    attributes:
+      label: API sketch
+      description: Optional C# / XAML sketch
+      render: csharp
+  - type: dropdown
+    id: breaking
+    attributes:
+      label: Breaking change?
+      options:
+        - "No"
+        - "Yes (semver major)"
+        - "Unsure"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

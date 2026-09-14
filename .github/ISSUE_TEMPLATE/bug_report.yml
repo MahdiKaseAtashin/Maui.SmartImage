@@ -1,0 +1,99 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a reproducible defect. Security issues: see [SECURITY.md](../SECURITY.md).
+  - type: input
+    id: package_version
+    attributes:
+      label: Package version
+      description: SmartImage.Maui version from NuGet or your csproj
+      placeholder: "1.0.5"
+    validations:
+      required: true
+  - type: input
+    id: dotnet
+    attributes:
+      label: .NET / MAUI
+      description: SDK and MAUI workload
+      placeholder: ".NET 10 / MAUI 10"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - Android
+        - iOS
+        - Windows
+        - Mac Catalyst
+        - All / not platform-specific
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / device
+      placeholder: "Windows 10 19045, Android 14 emulator, …"
+    validations:
+      required: true
+  - type: dropdown
+    id: source_kind
+    attributes:
+      label: Source kind
+      options:
+        - Local MAUI resource
+        - Local file path
+        - Remote HTTP(S) URL
+        - Empty / not applicable
+    validations:
+      required: true
+  - type: dropdown
+    id: cache_policy
+    attributes:
+      label: CachePolicy
+      options:
+        - MemoryAndDisk
+        - Memory
+        - Disk
+        - None
+        - Unknown / default
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. UseSmartImage() …
+        2. Set Source to …
+        3. Observe …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / State
+      description: SmartImage.State, exceptions, network errors (redact URLs with secrets)
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Sample snippet, UseSmartImage options, screenshots

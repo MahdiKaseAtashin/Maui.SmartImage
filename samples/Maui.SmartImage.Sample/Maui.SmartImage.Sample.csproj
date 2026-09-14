@@ -27,7 +27,7 @@
 		       <MauiXaml Update="MyPage.xaml" Inflator="Runtime" /> (force runtime inflation) -->
 		<MauiXamlInflator>SourceGen</MauiXamlInflator>
 
-		<!-- Display name / bundle folder (avoid spaces for Appium Mac2 path handling) -->
+		<!-- Display name -->
 		<ApplicationTitle>Maui.SmartImage.Sample</ApplicationTitle>
 
 		<!-- App Identifier -->
@@ -39,9 +39,6 @@
 
 		<!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
 		<WindowsPackageType>None</WindowsPackageType>
-
-		<!-- UI smoke builds: dotnet publish -p:SMARTIMAGE_SMOKE=true -->
-		<DefineConstants Condition="'$(SMARTIMAGE_SMOKE)' == 'true'">$(DefineConstants);SMARTIMAGE_SMOKE</DefineConstants>
 
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>

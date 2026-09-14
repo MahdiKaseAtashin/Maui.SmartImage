@@ -1,0 +1,99 @@
+- name: bug
+  color: "d73a4a"
+  description: Something isn't working
+- name: enhancement
+  color: "a2eeef"
+  description: New feature or request
+- name: documentation
+  color: "0075ca"
+  description: README, XML docs, or sample docs
+- name: question
+  color: "d876e3"
+  description: Further information is requested
+- name: good first issue
+  color: "7057ff"
+  description: Good for newcomers
+- name: help wanted
+  color: "008672"
+  description: Extra attention is needed
+- name: needs-repro
+  color: "fbca04"
+  description: Missing a reliable reproduction
+- name: needs-info
+  color: "d4c5f9"
+  description: Waiting on the reporter
+- name: duplicate
+  color: "cfd3d7"
+  description: Already tracked elsewhere
+- name: wontfix
+  color: "ffffff"
+  description: Will not be addressed
+- name: invalid
+  color: "e4e669"
+  description: Not a valid issue for this repo
+- name: blocked
+  color: "b60205"
+  description: Cannot proceed until something else lands
+- name: area/control
+  color: "1d76db"
+  description: SmartImage control / XAML
+- name: area/cache
+  color: "0e8a16"
+  description: Memory and disk cache
+- name: area/loader
+  color: "5319e7"
+  description: HTTP loader, retry, dedupe
+- name: area/packaging
+  color: "c2e0c6"
+  description: NuGet, csproj, SourceLink
+- name: area/sample
+  color: "f9d0c4"
+  description: Sample MAUI app
+- name: area/ci
+  color: "ededed"
+  description: GitHub Actions and rulesets
+- name: area/docs
+  color: "d4c5f9"
+  description: Docs-only changes
+- name: platform/android
+  color: "3ddc84"
+  description: Android
+- name: platform/ios
+  color: "000000"
+  description: iOS
+- name: platform/windows
+  color: "0078d4"
+  description: Windows
+- name: platform/maccatalyst
+  color: "555555"
+  description: Mac Catalyst
+- name: platform/all
+  color: "bfd4f2"
+  description: Not platform-specific
+- name: priority/p0
+  color: "b60205"
+  description: Ship-blocker
+- name: priority/p1
+  color: "d93f0b"
+  description: High
+- name: priority/p2
+  color: "fbca04"
+  description: Normal
+- name: breaking-change
+  color: "b60205"
+  description: Requires a major version bump
+- name: semver/major
+  color: "b60205"
+  description: Breaking API or behavior
+- name: semver/minor
+  color: "0e8a16"
+  description: Additive, compatible
+- name: semver/patch
+  color: "c2e0c6"
+  description: Compatible fix
+- name: dependencies
+  color: "0366d6"
+  description: Dependency updates
+- name: github_actions
+  color: "000000"
+  description: GitHub Actions
