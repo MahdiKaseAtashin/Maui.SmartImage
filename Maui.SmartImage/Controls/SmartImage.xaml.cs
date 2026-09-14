@@ -214,6 +214,7 @@ public partial class SmartImage : ContentView
             execute: () => _ = SafeRetryAsync(),
             canExecute: () => State != SmartImageState.Loading);
         InitializeComponent();
+        UpdateAutomationState();
     }
 
     /// <summary>
@@ -542,6 +543,7 @@ public partial class SmartImage : ContentView
             smartImage.OnPropertyChanged(nameof(IsLoading));
             smartImage.OnPropertyChanged(nameof(IsFailed));
             ((Command)smartImage.RetryCommand).ChangeCanExecute();
+            smartImage.UpdateAutomationState();
 
             if (smartImage.State == SmartImageState.Loading)
             {
@@ -552,6 +554,13 @@ public partial class SmartImage : ContentView
                 smartImage.StopShimmer();
             }
         }
+    }
+
+    private void UpdateAutomationState()
+    {
+        string stateName = State.ToString();
+        SemanticProperties.SetDescription(this, stateName);
+        AutomationProperties.SetName(this, stateName);
     }
 
     private void StartShimmer()

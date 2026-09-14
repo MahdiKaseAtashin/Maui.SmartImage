@@ -1,0 +1,290 @@
+name: UI Smoke
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  APPIUM_PORT: '4723'
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui --skip-manifest-update
+
+      - name: Enable Developer Mode (WinAppDriver)
+        shell: pwsh
+        run: |
+          reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1
+
+      - name: Install Appium + Windows driver
+        shell: pwsh
+        run: |
+          npm install -g appium
+          appium driver install windows
+
+      - name: Publish sample (Windows smoke)
+        shell: pwsh
+        run: |
+          dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj `
+            -c Release `
+            -f net10.0-windows10.0.19041.0 `
+            -r win-x64 `
+            -p:SMARTIMAGE_SMOKE=true `
+            -p:WindowsPackageType=None `
+            -o artifacts/windows-app
+
+      - name: Start Appium
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "appium" -ArgumentList "--port","$env:APPIUM_PORT","--log","appium-windows.log","--log-level","info" -WindowStyle Hidden
+          Start-Sleep -Seconds 8
+
+      - name: Run Windows UI smoke
+        shell: pwsh
+        env:
+          WINDOWS_APP_PATH: ${{ github.workspace }}\artifacts\windows-app\Maui.SmartImage.Sample.exe
+        run: |
+          if (-not (Test-Path $env:WINDOWS_APP_PATH)) {
+            Get-ChildItem -Recurse artifacts/windows-app | Select-Object -First 50 FullName
+            throw "WINDOWS_APP_PATH not found: $env:WINDOWS_APP_PATH"
+          }
+          dotnet test tests/UITests/UITests.Windows/UITests.Windows.csproj -c Release --logger "trx;LogFileName=windows-smoke.trx"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-windows
+          path: |
+            appium-windows.log
+            **/TestResults/*.trx
+          if-no-files-found: ignore
+
+  android:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui --skip-manifest-update
+
+      - name: Install Appium + UiAutomator2
+        run: |
+          npm install -g appium
+          appium driver install uiautomator2
+
+      - name: Publish sample (Android smoke)
+        run: |
+          dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj \
+            -c Release \
+            -f net10.0-android \
+            -p:SMARTIMAGE_SMOKE=true \
+            -p:TargetFrameworks=net10.0-android
+
+      - name: Locate APK
+        id: apk
+        run: |
+          APK=$(find samples/Maui.SmartImage.Sample/bin -name '*-Signed.apk' | head -n 1)
+          if [ -z "$APK" ]; then
+            APK=$(find samples/Maui.SmartImage.Sample/bin -name '*.apk' | head -n 1)
+          fi
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "Found APK: $APK"
+          test -n "$APK"
+
+      - name: Run Android emulator + UI smoke
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          force-avd-creation: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            set -e
+            appium --port ${{ env.APPIUM_PORT }} --log appium-android.log --log-level info &
+            APPIUM_PID=$!
+            sleep 10
+            export ANDROID_APP_PATH="${{ steps.apk.outputs.path }}"
+            echo "ANDROID_APP_PATH=$ANDROID_APP_PATH"
+            adb install -r "$ANDROID_APP_PATH"
+            dotnet test tests/UITests/UITests.Android/UITests.Android.csproj -c Release --logger "trx;LogFileName=android-smoke.trx"
+            kill $APPIUM_PID || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-android
+          path: |
+            appium-android.log
+            **/TestResults/*.trx
+          if-no-files-found: ignore
+
+  ios:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui --skip-manifest-update
+
+      - name: Install Appium + XCUITest
+        run: |
+          npm install -g appium
+          appium driver install xcuitest
+
+      - name: Publish sample (iOS simulator smoke)
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "arm64" ]; then RID=iossimulator-arm64; else RID=iossimulator-x64; fi
+          echo "RID=$RID"
+          dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj \
+            -c Release \
+            -f net10.0-ios \
+            -r "$RID" \
+            -p:SMARTIMAGE_SMOKE=true \
+            -p:TargetFrameworks=net10.0-ios \
+            -p:BuildIpa=false \
+            -p:_RequireCodeSigning=false
+
+      - name: Locate .app
+        id: app
+        run: |
+          APP=$(find samples/Maui.SmartImage.Sample/bin -type d -name 'Maui.SmartImage.Sample.app' | head -n 1)
+          echo "path=$APP" >> "$GITHUB_OUTPUT"
+          echo "Found app: $APP"
+          test -n "$APP"
+
+      - name: Start Appium
+        run: |
+          appium --port ${{ env.APPIUM_PORT }} --log appium-ios.log --log-level info &
+          echo $! > appium.pid
+          sleep 10
+
+      - name: Run iOS UI smoke
+        env:
+          IOS_APP_PATH: ${{ steps.app.outputs.path }}
+          IOS_DEVICE_NAME: iPhone 15
+        run: |
+          dotnet test tests/UITests/UITests.iOS/UITests.iOS.csproj -c Release --logger "trx;LogFileName=ios-smoke.trx"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-ios
+          path: |
+            appium-ios.log
+            **/TestResults/*.trx
+          if-no-files-found: ignore
+
+  maccatalyst:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui --skip-manifest-update
+
+      - name: Install Appium + Mac2
+        run: |
+          npm install -g appium
+          appium driver install mac2
+
+      - name: Publish sample (MacCatalyst smoke)
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "arm64" ]; then RID=maccatalyst-arm64; else RID=maccatalyst-x64; fi
+          echo "RID=$RID"
+          dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj \
+            -c Release \
+            -f net10.0-maccatalyst \
+            -r "$RID" \
+            -p:SMARTIMAGE_SMOKE=true \
+            -p:TargetFrameworks=net10.0-maccatalyst \
+            -p:CreatePackage=false
+
+      - name: Locate .app
+        id: app
+        run: |
+          APP=$(find samples/Maui.SmartImage.Sample/bin -type d -name 'Maui.SmartImage.Sample.app' | head -n 1)
+          echo "path=$APP" >> "$GITHUB_OUTPUT"
+          echo "Found app: $APP"
+          test -n "$APP"
+
+      - name: Start Appium
+        run: |
+          appium --port ${{ env.APPIUM_PORT }} --log appium-maccatalyst.log --log-level info &
+          echo $! > appium.pid
+          sleep 10
+
+      - name: Run MacCatalyst UI smoke
+        env:
+          MACCATALYST_APP_PATH: ${{ steps.app.outputs.path }}
+        run: |
+          dotnet test tests/UITests/UITests.MacCatalyst/UITests.MacCatalyst.csproj -c Release --logger "trx;LogFileName=maccatalyst-smoke.trx"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-maccatalyst
+          path: |
+            appium-maccatalyst.log
+            **/TestResults/*.trx
+          if-no-files-found: ignore

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:controls="clr-namespace:Maui.SmartImage.Controls;assembly=Maui.SmartImage"
+             x:Class="Maui.SmartImage.Sample.SmokePage"
+             Title="SmartImage Smoke"
+             AutomationId="Smoke.Page">
+
+    <VerticalStackLayout Padding="24" Spacing="24">
+        <Label Text="UI Smoke" FontSize="20" FontAttributes="Bold" AutomationId="Smoke.Title" />
+
+        <VerticalStackLayout Spacing="8">
+            <Label Text="Local resource" FontAttributes="Bold" />
+            <controls:SmartImage
+                AutomationId="Smoke.LocalImage"
+                Source="dotnet_bot.png"
+                HeightRequest="160"
+                Aspect="AspectFit"
+                EnableFadeAnimation="False" />
+        </VerticalStackLayout>
+
+        <VerticalStackLayout Spacing="8">
+            <Label Text="Failed remote" FontAttributes="Bold" />
+            <controls:SmartImage
+                AutomationId="Smoke.FailedRemote"
+                Source="https://this-host-does-not-exist.invalid/broken.jpg"
+                HeightRequest="160"
+                Aspect="AspectFit"
+                MaxRetryCount="0"
+                EnableAutomaticRetry="False"
+                EnableFadeAnimation="False"
+                RetryButtonText="Retry" />
+        </VerticalStackLayout>
+    </VerticalStackLayout>
+
+</ContentPage>
