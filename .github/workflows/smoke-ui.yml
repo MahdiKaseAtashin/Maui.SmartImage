@@ -43,7 +43,8 @@ jobs:
           Start-Process msiexec.exe -Wait -ArgumentList "/i `"$msi`" /qn /norestart"
           $wad = "${env:ProgramFiles(x86)}\Windows Application Driver\WinAppDriver.exe"
           if (-not (Test-Path $wad)) { throw "WinAppDriver not installed at $wad" }
-          Start-Process -FilePath $wad -WindowStyle Hidden
+          # Keep WinAppDriver off 4723 so Appium can bind there.
+          Start-Process -FilePath $wad -ArgumentList "4724" -WindowStyle Hidden
           Start-Sleep -Seconds 3
 
       - name: Install Appium + Windows driver
@@ -84,6 +85,7 @@ jobs:
         shell: pwsh
         env:
           WINDOWS_APP_PATH: ${{ github.workspace }}\artifacts\windows-app\Maui.SmartImage.Sample.exe
+          WINAPPDRIVER_URL: http://127.0.0.1:4724
         run: |
           if (-not (Test-Path $env:WINDOWS_APP_PATH)) {
             Get-ChildItem -Recurse artifacts/windows-app | Select-Object -First 50 FullName
@@ -242,7 +244,7 @@ jobs:
       - name: Locate .app
         id: app
         run: |
-          APP=$(find "$GITHUB_WORKSPACE/samples/Maui.SmartImage.Sample/bin" -type d -name 'Maui.SmartImage.Sample.app' | head -n 1)
+          APP=$(find "$GITHUB_WORKSPACE/samples/Maui.SmartImage.Sample/bin" -type d -name '*.app' | head -n 1)
           echo "path=$APP" >> "$GITHUB_OUTPUT"
           echo "Found app: $APP"
           test -n "$APP" && test -d "$APP"
@@ -250,7 +252,8 @@ jobs:
       - name: Resolve iOS simulator device
         id: sim
         run: |
-          NAME=$(xcrun simctl list devices available | sed -n 's/.*\(iPhone[^)]*\).*/\1/p' | head -n 1 | sed 's/ *(.*)//')
+          # Emit a clean device name only (no UDID / parentheses).
+          NAME=$(xcrun simctl list devices available | grep -oE 'iPhone [^(:]+' | head -n 1 | sed 's/[[:space:]]*$//')
           if [ -z "$NAME" ]; then NAME="iPhone 16"; fi
           echo "device=$NAME" >> "$GITHUB_OUTPUT"
           echo "Using simulator: $NAME"
@@ -324,7 +327,8 @@ jobs:
       - name: Locate .app
         id: app
         run: |
-          APP=$(find "$GITHUB_WORKSPACE/samples/Maui.SmartImage.Sample/bin" -type d -name 'Maui.SmartImage.Sample.app' | head -n 1)
+          # ApplicationTitle is "SmartImage.Maui Sample" → bundle is "SmartImage.Maui Sample.app"
+          APP=$(find "$GITHUB_WORKSPACE/samples/Maui.SmartImage.Sample/bin" -type d -name '*.app' | head -n 1)
           if [ -z "$APP" ]; then
             echo "No .app found; listing bin tree:"
             find "$GITHUB_WORKSPACE/samples/Maui.SmartImage.Sample/bin" -maxdepth 6 -print | head -n 200
