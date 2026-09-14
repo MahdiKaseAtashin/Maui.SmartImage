@@ -25,7 +25,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install MAUI workload
         run: dotnet workload install maui --skip-manifest-update
@@ -93,7 +93,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install MAUI workload
         run: dotnet workload install maui --skip-manifest-update
@@ -103,13 +103,16 @@ jobs:
           npm install -g appium
           appium driver install uiautomator2
 
+      # Pin android-x64 so restore does not ask for host Mono.osx-arm64 packs.
       - name: Publish sample (Android smoke)
         run: |
           dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj \
             -c Release \
             -f net10.0-android \
+            -r android-x64 \
             -p:SMARTIMAGE_SMOKE=true \
-            -p:TargetFrameworks=net10.0-android
+            -p:TargetFrameworks=net10.0-android \
+            -p:AndroidPackageFormats=apk
 
       - name: Locate APK
         id: apk
@@ -154,10 +157,20 @@ jobs:
           if-no-files-found: ignore
 
   ios:
-    runs-on: macos-14
-    timeout-minutes: 60
+    runs-on: macos-15
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.1'
+
+      - name: Ensure iOS platform / simulator runtime
+        run: |
+          xcrun simctl list > /dev/null || true
+          xcodebuild -downloadPlatform iOS -architectureVariant universal || xcodebuild -downloadPlatform iOS
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -167,7 +180,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install MAUI workload
         run: dotnet workload install maui --skip-manifest-update
@@ -177,18 +190,18 @@ jobs:
           npm install -g appium
           appium driver install xcuitest
 
-      - name: Publish sample (iOS simulator smoke)
+      # iOS simulator cannot use `dotnet publish` (device RID required). Build the .app instead.
+      - name: Build sample (iOS simulator smoke)
         run: |
           ARCH=$(uname -m)
           if [ "$ARCH" = "arm64" ]; then RID=iossimulator-arm64; else RID=iossimulator-x64; fi
           echo "RID=$RID"
-          dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj \
+          dotnet build samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj \
             -c Release \
             -f net10.0-ios \
             -r "$RID" \
             -p:SMARTIMAGE_SMOKE=true \
             -p:TargetFrameworks=net10.0-ios \
-            -p:BuildIpa=false \
             -p:_RequireCodeSigning=false
 
       - name: Locate .app
@@ -199,6 +212,16 @@ jobs:
           echo "Found app: $APP"
           test -n "$APP"
 
+      - name: Resolve iOS simulator device
+        id: sim
+        run: |
+          # Prefer a modern iPhone that exists on this image; fall back to first available iPhone.
+          NAME=$(xcrun simctl list devices available | sed -n 's/.*\(iPhone[^)]*\).*/\1/p' | head -n 1 | sed 's/ *(.*)//')
+          if [ -z "$NAME" ]; then NAME="iPhone 16"; fi
+          echo "device=$NAME" >> "$GITHUB_OUTPUT"
+          echo "Using simulator: $NAME"
+          xcrun simctl list devices available | head -n 40
+
       - name: Start Appium
         run: |
           appium --port ${{ env.APPIUM_PORT }} --log appium-ios.log --log-level info &
@@ -208,7 +231,7 @@ jobs:
       - name: Run iOS UI smoke
         env:
           IOS_APP_PATH: ${{ steps.app.outputs.path }}
-          IOS_DEVICE_NAME: iPhone 15
+          IOS_DEVICE_NAME: ${{ steps.sim.outputs.device }}
         run: |
           dotnet test tests/UITests/UITests.iOS/UITests.iOS.csproj -c Release --logger "trx;LogFileName=ios-smoke.trx"
 
@@ -223,10 +246,15 @@ jobs:
           if-no-files-found: ignore
 
   maccatalyst:
-    runs-on: macos-14
-    timeout-minutes: 45
+    runs-on: macos-15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.1'
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -236,7 +264,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install MAUI workload
         run: dotnet workload install maui --skip-manifest-update
