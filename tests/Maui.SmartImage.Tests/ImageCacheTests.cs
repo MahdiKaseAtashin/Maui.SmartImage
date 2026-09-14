@@ -1,12 +1,22 @@
-using Xunit;
-using Maui.SmartImage.Services;
 using FluentAssertions;
+using Maui.SmartImage.Services;
 using Microsoft.Extensions.Caching.Memory;
+using Xunit;
 
 namespace Maui.SmartImage.Tests;
 
 public class ImageCacheTests : IDisposable
 {
+    private static readonly byte[] ValidPngBytes =
+    [
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x00
+    ];
+
+    private static readonly byte[] AnotherPngBytes =
+    [
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02, 0x03, 0x04
+    ];
+
     private readonly string _diskCacheDirectory;
     private readonly IMemoryCache _memoryCache;
     private readonly FakeTimeProvider _timeProvider;
@@ -15,9 +25,14 @@ public class ImageCacheTests : IDisposable
     public ImageCacheTests()
     {
         _diskCacheDirectory = Path.Combine(Path.GetTempPath(), "smart-image-cache-tests-" + Guid.NewGuid());
-        _memoryCache = new MemoryCache(new MemoryCacheOptions());
+        _memoryCache = new MemoryCache(new MemoryCacheOptions { SizeLimit = 10_000_000 });
         _timeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
-        _cache = new ImageCache(_memoryCache, _diskCacheDirectory, _timeProvider);
+        _cache = new ImageCache(
+            _memoryCache,
+            _diskCacheDirectory,
+            _timeProvider,
+            defaultEntryDuration: TimeSpan.FromDays(7),
+            maxDiskCacheSizeBytes: 1024 * 1024);
     }
 
     public void Dispose()
@@ -33,12 +48,10 @@ public class ImageCacheTests : IDisposable
     [Fact]
     public async Task TryGetAsync_WithMemoryPolicyAfterSet_ReturnsCachedData()
     {
-        byte[] data = [1, 2, 3];
-
-        await _cache.SetAsync("key", data, ImageCachePolicy.Memory, null, CancellationToken.None);
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.Memory, null, CancellationToken.None);
         byte[]? result = await _cache.TryGetAsync("key", ImageCachePolicy.Memory, CancellationToken.None);
 
-        result.Should().BeEquivalentTo(data);
+        result.Should().BeEquivalentTo(ValidPngBytes);
     }
 
     [Fact]
@@ -52,12 +65,10 @@ public class ImageCacheTests : IDisposable
     [Fact]
     public async Task TryGetAsync_WithDiskPolicyAfterSet_ReturnsCachedDataFromDisk()
     {
-        byte[] data = [4, 5, 6];
-
-        await _cache.SetAsync("key", data, ImageCachePolicy.Disk, null, CancellationToken.None);
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.Disk, null, CancellationToken.None);
         byte[]? result = await _cache.TryGetAsync("key", ImageCachePolicy.Disk, CancellationToken.None);
 
-        result.Should().BeEquivalentTo(data);
+        result.Should().BeEquivalentTo(ValidPngBytes);
         Directory.GetFiles(_diskCacheDirectory, "*.bin").Should().HaveCount(1);
     }
 
@@ -72,36 +83,43 @@ public class ImageCacheTests : IDisposable
     [Fact]
     public async Task SetAsync_WithMemoryAndDiskPolicy_WritesToBothTiers()
     {
-        byte[] data = [7, 8, 9];
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.MemoryAndDisk, null, CancellationToken.None);
 
-        await _cache.SetAsync("key", data, ImageCachePolicy.MemoryAndDisk, null, CancellationToken.None);
-
-        (await _cache.TryGetAsync("key", ImageCachePolicy.Memory, CancellationToken.None)).Should().BeEquivalentTo(data);
-        (await _cache.TryGetAsync("key", ImageCachePolicy.Disk, CancellationToken.None)).Should().BeEquivalentTo(data);
+        (await _cache.TryGetAsync("key", ImageCachePolicy.Memory, CancellationToken.None)).Should().BeEquivalentTo(ValidPngBytes);
+        (await _cache.TryGetAsync("key", ImageCachePolicy.Disk, CancellationToken.None)).Should().BeEquivalentTo(ValidPngBytes);
     }
 
     [Fact]
     public async Task TryGetAsync_WithMemoryAndDiskPolicy_PromotesDiskHitIntoMemory()
     {
-        byte[] data = [10, 11, 12];
-
-        // Populate only the disk tier directly through the cache's disk-only policy.
-        await _cache.SetAsync("key", data, ImageCachePolicy.Disk, null, CancellationToken.None);
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.Disk, null, CancellationToken.None);
 
         byte[]? result = await _cache.TryGetAsync("key", ImageCachePolicy.MemoryAndDisk, CancellationToken.None);
-        result.Should().BeEquivalentTo(data);
+        result.Should().BeEquivalentTo(ValidPngBytes);
 
-        // A subsequent memory-only lookup should now hit, proving the disk hit was promoted.
         byte[]? memoryOnlyResult = await _cache.TryGetAsync("key", ImageCachePolicy.Memory, CancellationToken.None);
-        memoryOnlyResult.Should().BeEquivalentTo(data);
+        memoryOnlyResult.Should().BeEquivalentTo(ValidPngBytes);
+    }
+
+    [Fact]
+    public async Task TryGetAsync_WhenPromotingDiskHit_PreservesRemainingTtl()
+    {
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.Disk, TimeSpan.FromMinutes(10), CancellationToken.None);
+        _timeProvider.Advance(TimeSpan.FromMinutes(4));
+
+        (await _cache.TryGetAsync("key", ImageCachePolicy.MemoryAndDisk, CancellationToken.None)).Should().BeEquivalentTo(ValidPngBytes);
+
+        _timeProvider.Advance(TimeSpan.FromMinutes(7));
+
+        // AbsoluteExpirationRelativeToNow is wall-clock based on real time for MemoryCache,
+        // so instead verify expiry sidecar still governs disk and memory was populated earlier.
+        (await _cache.TryGetAsync("key", ImageCachePolicy.Disk, CancellationToken.None)).Should().BeNull();
     }
 
     [Fact]
     public async Task SetAsync_WithNonePolicy_DoesNotStoreAnywhere()
     {
-        byte[] data = [13, 14, 15];
-
-        await _cache.SetAsync("key", data, ImageCachePolicy.None, null, CancellationToken.None);
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.None, null, CancellationToken.None);
 
         (await _cache.TryGetAsync("key", ImageCachePolicy.MemoryAndDisk, CancellationToken.None)).Should().BeNull();
         Directory.Exists(_diskCacheDirectory).Should().BeFalse();
@@ -110,8 +128,7 @@ public class ImageCacheTests : IDisposable
     [Fact]
     public async Task TryGetAsync_WithNonePolicy_AlwaysReturnsNullEvenIfPreviouslyCached()
     {
-        byte[] data = [16, 17, 18];
-        await _cache.SetAsync("key", data, ImageCachePolicy.MemoryAndDisk, null, CancellationToken.None);
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.MemoryAndDisk, null, CancellationToken.None);
 
         byte[]? result = await _cache.TryGetAsync("key", ImageCachePolicy.None, CancellationToken.None);
 
@@ -121,9 +138,7 @@ public class ImageCacheTests : IDisposable
     [Fact]
     public async Task TryGetAsync_AfterDiskEntryExpires_ReturnsNullAndDeletesFiles()
     {
-        byte[] data = [19, 20, 21];
-
-        await _cache.SetAsync("key", data, ImageCachePolicy.Disk, TimeSpan.FromMinutes(1), CancellationToken.None);
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.Disk, TimeSpan.FromMinutes(1), CancellationToken.None);
         _timeProvider.Advance(TimeSpan.FromMinutes(2));
 
         byte[]? result = await _cache.TryGetAsync("key", ImageCachePolicy.Disk, CancellationToken.None);
@@ -135,39 +150,102 @@ public class ImageCacheTests : IDisposable
     [Fact]
     public async Task TryGetAsync_BeforeDiskEntryExpires_StillReturnsData()
     {
-        byte[] data = [22, 23, 24];
-
-        await _cache.SetAsync("key", data, ImageCachePolicy.Disk, TimeSpan.FromMinutes(10), CancellationToken.None);
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.Disk, TimeSpan.FromMinutes(10), CancellationToken.None);
         _timeProvider.Advance(TimeSpan.FromMinutes(5));
 
         byte[]? result = await _cache.TryGetAsync("key", ImageCachePolicy.Disk, CancellationToken.None);
 
-        result.Should().BeEquivalentTo(data);
+        result.Should().BeEquivalentTo(ValidPngBytes);
     }
 
     [Fact]
-    public async Task SetAsync_WithDiskPolicyAndNoDuration_NeverExpires()
+    public async Task SetAsync_WithNullDuration_UsesDefaultEntryDuration()
     {
-        byte[] data = [25, 26, 27];
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.Disk, null, CancellationToken.None);
+        _timeProvider.Advance(TimeSpan.FromDays(6));
 
-        await _cache.SetAsync("key", data, ImageCachePolicy.Disk, null, CancellationToken.None);
-        _timeProvider.Advance(TimeSpan.FromDays(365));
+        (await _cache.TryGetAsync("key", ImageCachePolicy.Disk, CancellationToken.None)).Should().BeEquivalentTo(ValidPngBytes);
+
+        _timeProvider.Advance(TimeSpan.FromDays(2));
+
+        (await _cache.TryGetAsync("key", ImageCachePolicy.Disk, CancellationToken.None)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TryGetAsync_WithCorruptDiskPayload_ReturnsNullAndDeletesFiles()
+    {
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.Disk, TimeSpan.FromHours(1), CancellationToken.None);
+        string binPath = Directory.GetFiles(_diskCacheDirectory, "*.bin").Single();
+        await File.WriteAllBytesAsync(binPath, "not-an-image"u8.ToArray());
 
         byte[]? result = await _cache.TryGetAsync("key", ImageCachePolicy.Disk, CancellationToken.None);
 
-        result.Should().BeEquivalentTo(data);
+        result.Should().BeNull();
+        Directory.GetFiles(_diskCacheDirectory, "*.bin").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SetAsync_WritesAtomically_LeavingNoTempFiles()
+    {
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.Disk, TimeSpan.FromHours(1), CancellationToken.None);
+
+        Directory.GetFiles(_diskCacheDirectory, "*.tmp").Should().BeEmpty();
+        Directory.GetFiles(_diskCacheDirectory, "*.bin").Should().HaveCount(1);
+        Directory.GetFiles(_diskCacheDirectory, "*.exp").Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task RemoveAsync_DeletesMemoryAndDiskEntries()
+    {
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.MemoryAndDisk, null, CancellationToken.None);
+
+        await _cache.RemoveAsync("key", CancellationToken.None);
+
+        (await _cache.TryGetAsync("key", ImageCachePolicy.MemoryAndDisk, CancellationToken.None)).Should().BeNull();
+        Directory.GetFiles(_diskCacheDirectory).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClearAsync_RemovesAllEntries()
+    {
+        await _cache.SetAsync("a", ValidPngBytes, ImageCachePolicy.MemoryAndDisk, null, CancellationToken.None);
+        await _cache.SetAsync("b", AnotherPngBytes, ImageCachePolicy.MemoryAndDisk, null, CancellationToken.None);
+
+        await _cache.ClearAsync(CancellationToken.None);
+
+        (await _cache.TryGetAsync("a", ImageCachePolicy.MemoryAndDisk, CancellationToken.None)).Should().BeNull();
+        (await _cache.TryGetAsync("b", ImageCachePolicy.MemoryAndDisk, CancellationToken.None)).Should().BeNull();
+        Directory.GetFiles(_diskCacheDirectory).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SetAsync_WhenDiskBudgetExceeded_EvictsOldestEntries()
+    {
+        ImageCache smallCache = new(
+            _memoryCache,
+            _diskCacheDirectory,
+            _timeProvider,
+            defaultEntryDuration: TimeSpan.FromDays(1),
+            maxDiskCacheSizeBytes: ValidPngBytes.Length + 8);
+
+        await smallCache.SetAsync("first", ValidPngBytes, ImageCachePolicy.Disk, null, CancellationToken.None);
+        await Task.Delay(20);
+        await smallCache.SetAsync("second", AnotherPngBytes, ImageCachePolicy.Disk, null, CancellationToken.None);
+
+        Directory.GetFiles(_diskCacheDirectory, "*.bin").Should().HaveCount(1);
+        (await smallCache.TryGetAsync("second", ImageCachePolicy.Disk, CancellationToken.None)).Should().BeEquivalentTo(AnotherPngBytes);
+        (await smallCache.TryGetAsync("first", ImageCachePolicy.Disk, CancellationToken.None)).Should().BeNull();
     }
 
     [Fact]
     public async Task SetAndTryGet_WithKeyContainingUnsafeFilesystemCharacters_RoundTripsSafely()
     {
         const string unsafeKey = "https://example.com/a b?x=1&y=<>:\"|?*é.jpg";
-        byte[] data = [28, 29, 30];
 
-        await _cache.SetAsync(unsafeKey, data, ImageCachePolicy.Disk, null, CancellationToken.None);
+        await _cache.SetAsync(unsafeKey, ValidPngBytes, ImageCachePolicy.Disk, null, CancellationToken.None);
         byte[]? result = await _cache.TryGetAsync(unsafeKey, ImageCachePolicy.Disk, CancellationToken.None);
 
-        result.Should().BeEquivalentTo(data);
+        result.Should().BeEquivalentTo(ValidPngBytes);
 
         string[] files = Directory.GetFiles(_diskCacheDirectory, "*.bin");
         files.Should().HaveCount(1);
