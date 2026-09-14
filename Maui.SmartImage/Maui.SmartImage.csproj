@@ -14,10 +14,10 @@
     </PropertyGroup>
 
     <PropertyGroup>
-        <PackageId>Maui.SmartImage</PackageId>
+        <PackageId>SmartImage.Maui</PackageId>
         <Version>$(PackageVersion)</Version>
         <Authors>Mahdi Kase Atashin</Authors>
-        <Product>Maui.SmartImage</Product>
+        <Product>SmartImage.Maui</Product>
         <Description>A production-ready, cache-aware, retryable image control for .NET MAUI with automatic local/remote source detection, two-tier memory+disk caching, and request deduplication.</Description>
         <PackageTags>maui;image;caching;imageloading;plugin;dotnet-maui</PackageTags>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>

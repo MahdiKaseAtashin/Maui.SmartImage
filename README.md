@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/)
 [![MAUI](https://img.shields.io/badge/MAUI-10-0EA5E9.svg)](https://learn.microsoft.com/dotnet/maui/)
-[![NuGet](https://img.shields.io/badge/NuGet-1.0.0-blue.svg)](https://www.nuget.org/packages/Maui.SmartImage)
+[![NuGet](https://img.shields.io/badge/NuGet-SmartImage.Maui-blue.svg)](https://www.nuget.org/packages/SmartImage.Maui)
 
 A cache-aware, retryable image control for **.NET MAUI 10**.
 
@@ -37,7 +37,7 @@ A cache-aware, retryable image control for **.NET MAUI 10**.
 ## Install
 
 ```sh
-dotnet add package Maui.SmartImage
+dotnet add package SmartImage.Maui
 ```
 
 In `MauiProgram.cs`:
