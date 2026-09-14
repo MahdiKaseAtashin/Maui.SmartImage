@@ -18,12 +18,18 @@ public class AppiumSetup
 
         AppiumSession.EnsureServer();
 
+        // Without bundleId, Mac2 automates Finder instead of the Catalyst app.
+        // See: https://learn.microsoft.com/dotnet/maui/deployment/ui-testing
+        const string bundleId = "com.mahdi.smartimage.maui.sample";
+
         AppiumOptions options = new();
         options.PlatformName = "Mac";
         options.AutomationName = "Mac2";
         options.App = appPath;
+        options.AddAdditionalAppiumOption("bundleId", bundleId);
         options.AddAdditionalAppiumOption("newCommandTimeout", 300);
         options.AddAdditionalAppiumOption("arguments", new[] { "--smoke" });
+        options.AddAdditionalAppiumOption("showServerLogs", true);
 
         AppiumSession.Driver = new MacDriver(AppiumSession.ServerUri, options, TimeSpan.FromMinutes(5));
     }

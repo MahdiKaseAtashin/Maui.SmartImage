@@ -327,7 +327,7 @@ jobs:
       - name: Locate .app
         id: app
         run: |
-          # ApplicationTitle is "SmartImage.Maui Sample" → bundle is "SmartImage.Maui Sample.app"
+          # ApplicationTitle is Maui.SmartImage.Sample → Maui.SmartImage.Sample.app
           APP=$(find "$GITHUB_WORKSPACE/samples/Maui.SmartImage.Sample/bin" -type d -name '*.app' | head -n 1)
           if [ -z "$APP" ]; then
             echo "No .app found; listing bin tree:"

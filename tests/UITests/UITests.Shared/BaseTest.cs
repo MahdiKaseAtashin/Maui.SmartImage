@@ -167,8 +167,8 @@ public abstract class BaseTest
 
     private static IEnumerable<By> LocatorStrategies(string automationId)
     {
+        // Mac2 maps id / accessibility id / name to AXIdentifier; CSS-style By.Id is invalid there.
         yield return MobileBy.AccessibilityId(automationId);
-        yield return By.Name(automationId);
-        yield return By.Id(automationId);
+        yield return MobileBy.Id(automationId);
     }
 }
