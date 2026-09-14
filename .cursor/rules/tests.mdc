@@ -1,0 +1,11 @@
+---
+description: Unit tests for cache, loader, and control
+globs: tests/**
+alwaysApply: false
+---
+
+# Tests
+
+- Prefer unit tests over UI/device tests. Use the existing MAUI test bootstrap.
+- Cover cache, loader, classifier, generation guard, and `UseSmartImage` registration.
+- Do not require iOS/Mac Catalyst restore in CI-style test runs.

@@ -1,0 +1,12 @@
+---
+description: GitHub Actions, labels, and pack-on-tag
+globs: .github/**
+alwaysApply: false
+---
+
+# GitHub
+
+- CI runs on `windows-latest` with .NET 10 and the MAUI workload. Build library + tests; sample only as `net10.0-windows`.
+- Pack and push NuGet only from `v*` tags (`pack.yml`).
+- Labels live in `.github/labels.yml` (`skip-delete: true`). Do not invent one-off label names when a taxonomy label fits.
+- Package id on nuget.org is `SmartImage.Maui`.

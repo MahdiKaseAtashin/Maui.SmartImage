@@ -1,0 +1,12 @@
+---
+description: Image cache, HTTP loader, retry, and source classification
+globs: Maui.SmartImage/Services/**
+alwaysApply: false
+---
+
+# Services
+
+- Classify sources before network: empty / local resource / file / HTTP(S).
+- Memory + disk cache: size limits, TTL, atomic disk writes, unique temp files.
+- Loader: in-flight dedupe, retry only transient failures (408/429/5xx, timeouts, network). Do not retry SSL failures.
+- Respect `MaxImageSizeBytes` and per-attempt timeout.
