@@ -495,7 +495,7 @@ public partial class SmartImage : ContentView
 
         if (result.IsSuccess)
         {
-            await ApplyLoadedAsync(result.ImageData!).ConfigureAwait(true);
+            await ApplyLoadedAsync(result.ImageData!, generation).ConfigureAwait(true);
         }
         else
         {
@@ -528,7 +528,7 @@ public partial class SmartImage : ContentView
         }
     }
 
-    private async Task ApplyLoadedAsync(byte[] imageData)
+    private async Task ApplyLoadedAsync(byte[] imageData, long generation)
     {
         State = SmartImageState.Loaded;
         Error = null;
@@ -538,6 +538,13 @@ public partial class SmartImage : ContentView
         if (EnableFadeAnimation)
         {
             await PART_Image.FadeToAsync(0, 100).ConfigureAwait(true);
+
+            if (!_guard.IsCurrent(generation))
+            {
+                PART_Image.Opacity = 1;
+                return;
+            }
+
             PART_Image.Source = loadedSource;
             await PART_Image.FadeToAsync(1, 150).ConfigureAwait(true);
         }
