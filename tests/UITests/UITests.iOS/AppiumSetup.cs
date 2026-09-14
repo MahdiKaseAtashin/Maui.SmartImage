@@ -16,6 +16,8 @@ public class AppiumSetup
             throw new FileNotFoundException($"iOS app bundle not found at '{appPath}'.", appPath);
         }
 
+        AppiumSession.EnsureServer();
+
         AppiumOptions options = new();
         options.PlatformName = "iOS";
         options.AutomationName = "XCUITest";
@@ -41,5 +43,6 @@ public class AppiumSetup
         AppiumSession.Driver?.Quit();
         AppiumSession.Driver?.Dispose();
         AppiumSession.Driver = null;
+        AppiumSession.StopServer();
     }
 }

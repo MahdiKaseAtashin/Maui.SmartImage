@@ -35,17 +35,42 @@ jobs:
         run: |
           reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1
 
+      - name: Install WinAppDriver
+        shell: pwsh
+        run: |
+          $msi = "$env:RUNNER_TEMP\WinAppDriver.msi"
+          Invoke-WebRequest -Uri "https://github.com/microsoft/WinAppDriver/releases/download/v1.2.1/WindowsApplicationDriver_1.2.1.msi" -OutFile $msi
+          Start-Process msiexec.exe -Wait -ArgumentList "/i `"$msi`" /qn /norestart"
+          $wad = "${env:ProgramFiles(x86)}\Windows Application Driver\WinAppDriver.exe"
+          if (-not (Test-Path $wad)) { throw "WinAppDriver not installed at $wad" }
+          Start-Process -FilePath $wad -WindowStyle Hidden
+          Start-Sleep -Seconds 3
+
       - name: Install Appium + Windows driver
         shell: pwsh
         run: |
           npm install -g appium
           appium driver install windows
+          $appiumCmd = (Get-Command appium.cmd).Source
+          Start-Process -FilePath $appiumCmd -ArgumentList "--port",$env:APPIUM_PORT,"--log","$PWD\appium-windows.log","--log-level","info" -WindowStyle Hidden
+          $deadline = (Get-Date).AddMinutes(2)
+          do {
+            try {
+              $client = New-Object System.Net.Sockets.TcpClient
+              $client.Connect("127.0.0.1", [int]$env:APPIUM_PORT)
+              $client.Close()
+              Write-Host "Appium is listening on $($env:APPIUM_PORT)"
+              break
+            } catch {
+              if ((Get-Date) -gt $deadline) { throw "Appium did not open port $($env:APPIUM_PORT)" }
+              Start-Sleep -Seconds 2
+            }
+          } while ($true)
 
       - name: Publish sample (Windows smoke)
         shell: pwsh
         run: |
           # Avoid `-r win-x64` — it pulls a missing Mono.win-x64 runtime pack.
-          # RuntimeIdentifierOverride keeps a native WinUI output without Mono restore.
           dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj `
             -c Release `
             -f net10.0-windows10.0.19041.0 `
@@ -54,12 +79,6 @@ jobs:
             -p:RuntimeIdentifierOverride=win-x64 `
             -p:UseMonoRuntime=false `
             -o artifacts/windows-app
-
-      - name: Start Appium
-        shell: pwsh
-        run: |
-          Start-Process -FilePath "appium" -ArgumentList "--port","$env:APPIUM_PORT","--log","appium-windows.log","--log-level","info" -WindowStyle Hidden
-          Start-Sleep -Seconds 8
 
       - name: Run Windows UI smoke
         shell: pwsh
@@ -79,14 +98,22 @@ jobs:
           name: smoke-windows
           path: |
             appium-windows.log
+            appium-local.log
             **/TestResults/*.trx
           if-no-files-found: ignore
 
   android:
-    runs-on: macos-14
+    # Linux + KVM is far more reliable for x86_64 emulators than Apple Silicon hosts.
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -98,21 +125,26 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Install MAUI workload
-        run: dotnet workload install maui --skip-manifest-update
+        run: dotnet workload install maui-android --skip-manifest-update
 
       - name: Install Appium + UiAutomator2
         run: |
           npm install -g appium
           appium driver install uiautomator2
 
-      # macos-14 is Apple Silicon — use android-arm64 + arm64-v8a emulator image.
       - name: Publish sample (Android smoke)
         run: |
           dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj \
             -c Release \
             -f net10.0-android \
-            -r android-arm64 \
+            -r android-x64 \
             -p:SMARTIMAGE_SMOKE=true \
             -p:TargetFrameworks=net10.0-android \
             -p:AndroidPackageFormats=apk
@@ -120,9 +152,9 @@ jobs:
       - name: Locate APK
         id: apk
         run: |
-          APK=$(find samples/Maui.SmartImage.Sample/bin -name '*-Signed.apk' | head -n 1)
+          APK=$(find "$GITHUB_WORKSPACE/samples/Maui.SmartImage.Sample/bin" -name '*-Signed.apk' | head -n 1)
           if [ -z "$APK" ]; then
-            APK=$(find samples/Maui.SmartImage.Sample/bin -name '*.apk' | head -n 1)
+            APK=$(find "$GITHUB_WORKSPACE/samples/Maui.SmartImage.Sample/bin" -name '*.apk' | head -n 1)
           fi
           echo "path=$APK" >> "$GITHUB_OUTPUT"
           echo "Found APK: $APK"
@@ -133,21 +165,19 @@ jobs:
         with:
           api-level: 30
           target: google_apis
-          arch: arm64-v8a
+          arch: x86_64
           profile: pixel_6
           force-avd-creation: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: true
           script: |
             set -e
-            appium --port ${{ env.APPIUM_PORT }} --log appium-android.log --log-level info &
-            APPIUM_PID=$!
+            appium --port ${{ env.APPIUM_PORT }} --log "$GITHUB_WORKSPACE/appium-android.log" --log-level info &
             sleep 10
             export ANDROID_APP_PATH="${{ steps.apk.outputs.path }}"
             echo "ANDROID_APP_PATH=$ANDROID_APP_PATH"
             adb install -r "$ANDROID_APP_PATH"
             dotnet test tests/UITests/UITests.Android/UITests.Android.csproj -c Release --logger "trx;LogFileName=android-smoke.trx"
-            kill $APPIUM_PID || true
 
       - name: Upload artifacts
         if: always()
@@ -156,6 +186,7 @@ jobs:
           name: smoke-android
           path: |
             appium-android.log
+            appium-local.log
             **/TestResults/*.trx
           if-no-files-found: ignore
 
@@ -168,7 +199,7 @@ jobs:
       - name: Select Xcode 26
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          # Microsoft.iOS/MacCatalyst 26.0.x requires Xcode 26.0 (not 26.1.x).
+          # Microsoft.iOS 26.0.x requires Xcode 26.0 (not 26.1.x).
           xcode-version: '26.0'
 
       - name: Ensure iOS platform / simulator runtime
@@ -211,15 +242,14 @@ jobs:
       - name: Locate .app
         id: app
         run: |
-          APP=$(find samples/Maui.SmartImage.Sample/bin -type d -name 'Maui.SmartImage.Sample.app' | head -n 1)
+          APP=$(find "$GITHUB_WORKSPACE/samples/Maui.SmartImage.Sample/bin" -type d -name 'Maui.SmartImage.Sample.app' | head -n 1)
           echo "path=$APP" >> "$GITHUB_OUTPUT"
           echo "Found app: $APP"
-          test -n "$APP"
+          test -n "$APP" && test -d "$APP"
 
       - name: Resolve iOS simulator device
         id: sim
         run: |
-          # Prefer a modern iPhone that exists on this image; fall back to first available iPhone.
           NAME=$(xcrun simctl list devices available | sed -n 's/.*\(iPhone[^)]*\).*/\1/p' | head -n 1 | sed 's/ *(.*)//')
           if [ -z "$NAME" ]; then NAME="iPhone 16"; fi
           echo "device=$NAME" >> "$GITHUB_OUTPUT"
@@ -228,8 +258,7 @@ jobs:
 
       - name: Start Appium
         run: |
-          appium --port ${{ env.APPIUM_PORT }} --log appium-ios.log --log-level info &
-          echo $! > appium.pid
+          appium --port ${{ env.APPIUM_PORT }} --log "$GITHUB_WORKSPACE/appium-ios.log" --log-level info &
           sleep 10
 
       - name: Run iOS UI smoke
@@ -246,6 +275,7 @@ jobs:
           name: smoke-ios
           path: |
             appium-ios.log
+            appium-local.log
             **/TestResults/*.trx
           if-no-files-found: ignore
 
@@ -258,7 +288,6 @@ jobs:
       - name: Select Xcode 26
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          # Microsoft.iOS/MacCatalyst 26.0.x requires Xcode 26.0 (not 26.1.x).
           xcode-version: '26.0'
 
       - name: Setup .NET
@@ -279,31 +308,34 @@ jobs:
           npm install -g appium
           appium driver install mac2
 
-      - name: Publish sample (MacCatalyst smoke)
+      # Prefer build over publish so the .app bundle is produced reliably for Mac2.
+      - name: Build sample (MacCatalyst smoke)
         run: |
           ARCH=$(uname -m)
           if [ "$ARCH" = "arm64" ]; then RID=maccatalyst-arm64; else RID=maccatalyst-x64; fi
           echo "RID=$RID"
-          dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj \
+          dotnet build samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj \
             -c Release \
             -f net10.0-maccatalyst \
             -r "$RID" \
             -p:SMARTIMAGE_SMOKE=true \
-            -p:TargetFrameworks=net10.0-maccatalyst \
-            -p:CreatePackage=false
+            -p:TargetFrameworks=net10.0-maccatalyst
 
       - name: Locate .app
         id: app
         run: |
-          APP=$(find samples/Maui.SmartImage.Sample/bin -type d -name 'Maui.SmartImage.Sample.app' | head -n 1)
+          APP=$(find "$GITHUB_WORKSPACE/samples/Maui.SmartImage.Sample/bin" -type d -name 'Maui.SmartImage.Sample.app' | head -n 1)
+          if [ -z "$APP" ]; then
+            echo "No .app found; listing bin tree:"
+            find "$GITHUB_WORKSPACE/samples/Maui.SmartImage.Sample/bin" -maxdepth 6 -print | head -n 200
+          fi
           echo "path=$APP" >> "$GITHUB_OUTPUT"
           echo "Found app: $APP"
-          test -n "$APP"
+          test -n "$APP" && test -d "$APP"
 
       - name: Start Appium
         run: |
-          appium --port ${{ env.APPIUM_PORT }} --log appium-maccatalyst.log --log-level info &
-          echo $! > appium.pid
+          appium --port ${{ env.APPIUM_PORT }} --log "$GITHUB_WORKSPACE/appium-maccatalyst.log" --log-level info &
           sleep 10
 
       - name: Run MacCatalyst UI smoke
@@ -319,5 +351,6 @@ jobs:
           name: smoke-maccatalyst
           path: |
             appium-maccatalyst.log
+            appium-local.log
             **/TestResults/*.trx
           if-no-files-found: ignore

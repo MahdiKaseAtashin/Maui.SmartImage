@@ -16,6 +16,8 @@ public class AppiumSetup
             throw new FileNotFoundException($"MacCatalyst app not found at '{appPath}'.", appPath);
         }
 
+        AppiumSession.EnsureServer();
+
         AppiumOptions options = new();
         options.PlatformName = "Mac";
         options.AutomationName = "Mac2";
@@ -32,5 +34,6 @@ public class AppiumSetup
         AppiumSession.Driver?.Quit();
         AppiumSession.Driver?.Dispose();
         AppiumSession.Driver = null;
+        AppiumSession.StopServer();
     }
 }

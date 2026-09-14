@@ -16,6 +16,8 @@ public class AppiumSetup
             throw new FileNotFoundException($"Windows app not found at '{appPath}'.", appPath);
         }
 
+        AppiumSession.EnsureServer();
+
         AppiumOptions options = new();
         options.PlatformName = "Windows";
         options.AutomationName = "Windows";
@@ -33,5 +35,6 @@ public class AppiumSetup
         AppiumSession.Driver?.Quit();
         AppiumSession.Driver?.Dispose();
         AppiumSession.Driver = null;
+        AppiumSession.StopServer();
     }
 }

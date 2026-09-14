@@ -16,6 +16,8 @@ public class AppiumSetup
             throw new FileNotFoundException($"Android APK not found at '{appPath}'.", appPath);
         }
 
+        AppiumSession.EnsureServer();
+
         AppiumOptions options = new();
         options.PlatformName = "Android";
         options.AutomationName = "UiAutomator2";
@@ -25,7 +27,6 @@ public class AppiumSetup
         options.AddAdditionalAppiumOption("disableWindowAnimation", true);
         options.AddAdditionalAppiumOption("appWaitActivity", "*");
 
-        // Prefer an already-running emulator/device when DEVICE_NAME is set.
         string? deviceName = Environment.GetEnvironmentVariable("ANDROID_DEVICE_NAME");
         if (!string.IsNullOrWhiteSpace(deviceName))
         {
@@ -41,5 +42,6 @@ public class AppiumSetup
         AppiumSession.Driver?.Quit();
         AppiumSession.Driver?.Dispose();
         AppiumSession.Driver = null;
+        AppiumSession.StopServer();
     }
 }
