@@ -49,15 +49,30 @@ jobs:
         uses: NuGet/login@v1
         id: login
         with:
-          # nuget.org profile username (NOT email). Prefer a repo secret.
+          # Must match nuget.org profile username AND Trusted Publishing "Package Owner"
           user: ${{ secrets.NUGET_USER }}
 
       - name: Push to NuGet.org
         shell: pwsh
         run: |
-          Get-ChildItem artifacts -Filter *.nupkg | ForEach-Object {
-            dotnet nuget push $_.FullName `
-              --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" `
-              --source https://api.nuget.org/v3/index.json `
-              --skip-duplicate
+          $key = "${{ steps.login.outputs.NUGET_API_KEY }}"
+          if ([string]::IsNullOrWhiteSpace($key)) {
+            throw "NuGet login did not return an API key. Check NUGET_USER secret and Trusted Publishing policy."
           }
+
+          $packages = @(Get-ChildItem artifacts -Filter *.nupkg)
+          if ($packages.Count -eq 0) {
+            throw "No .nupkg files found in artifacts/."
+          }
+
+          foreach ($pkg in $packages) {
+            Write-Host "Pushing $($pkg.Name)..."
+            dotnet nuget push $pkg.FullName `
+              --api-key $key `
+              --source https://api.nuget.org/v3/index.json
+            if ($LASTEXITCODE -ne 0) {
+              throw "dotnet nuget push failed for $($pkg.Name) with exit code $LASTEXITCODE"
+            }
+          }
+
+          Write-Host "Push completed. Package may take a few minutes to appear on nuget.org."
