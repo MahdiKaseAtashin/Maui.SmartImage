@@ -1,11 +1,17 @@
+using System.Diagnostics;
 using System.Windows.Input;
-using CommunityToolkit.Mvvm.Input;
 using Maui.SmartImage.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Maui.SmartImage.Controls;
 
+/// <summary>
+/// Cache-aware, retryable image control with automatic local/remote source detection.
+/// </summary>
 public partial class SmartImage : ContentView
 {
+    /// <summary>Bindable property for <see cref="Source"/>.</summary>
     public static readonly BindableProperty SourceProperty = BindableProperty.Create(
         nameof(Source),
         typeof(string),
@@ -14,20 +20,25 @@ public partial class SmartImage : ContentView
         BindingMode.OneWay,
         propertyChanged: SourcePropertyChanged);
 
+    /// <summary>Bindable property for <see cref="Placeholder"/>.</summary>
     public static readonly BindableProperty PlaceholderProperty = BindableProperty.Create(
         nameof(Placeholder),
         typeof(ImageSource),
         typeof(SmartImage),
         null,
-        BindingMode.OneWay);
+        BindingMode.OneWay,
+        propertyChanged: PlaceholderOrErrorImageChanged);
 
+    /// <summary>Bindable property for <see cref="ErrorImage"/>.</summary>
     public static readonly BindableProperty ErrorImageProperty = BindableProperty.Create(
         nameof(ErrorImage),
         typeof(ImageSource),
         typeof(SmartImage),
         null,
-        BindingMode.OneWay);
+        BindingMode.OneWay,
+        propertyChanged: PlaceholderOrErrorImageChanged);
 
+    /// <summary>Bindable property for <see cref="KeepPreviousImageWhileLoading"/>.</summary>
     public static readonly BindableProperty KeepPreviousImageWhileLoadingProperty = BindableProperty.Create(
         nameof(KeepPreviousImageWhileLoading),
         typeof(bool),
@@ -35,6 +46,7 @@ public partial class SmartImage : ContentView
         false,
         BindingMode.OneWay);
 
+    /// <summary>Bindable property for <see cref="CachePolicy"/>.</summary>
     public static readonly BindableProperty CachePolicyProperty = BindableProperty.Create(
         nameof(CachePolicy),
         typeof(ImageCachePolicy),
@@ -42,6 +54,7 @@ public partial class SmartImage : ContentView
         ImageCachePolicy.MemoryAndDisk,
         BindingMode.OneWay);
 
+    /// <summary>Bindable property for <see cref="CacheDuration"/>.</summary>
     public static readonly BindableProperty CacheDurationProperty = BindableProperty.Create(
         nameof(CacheDuration),
         typeof(TimeSpan?),
@@ -49,6 +62,7 @@ public partial class SmartImage : ContentView
         null,
         BindingMode.OneWay);
 
+    /// <summary>Bindable property for <see cref="Timeout"/>.</summary>
     public static readonly BindableProperty TimeoutProperty = BindableProperty.Create(
         nameof(Timeout),
         typeof(TimeSpan?),
@@ -56,6 +70,7 @@ public partial class SmartImage : ContentView
         null,
         BindingMode.OneWay);
 
+    /// <summary>Bindable property for <see cref="MaxImageSizeBytes"/>.</summary>
     public static readonly BindableProperty MaxImageSizeBytesProperty = BindableProperty.Create(
         nameof(MaxImageSizeBytes),
         typeof(long?),
@@ -63,13 +78,16 @@ public partial class SmartImage : ContentView
         null,
         BindingMode.OneWay);
 
+    /// <summary>Bindable property for <see cref="MaxRetryCount"/>.</summary>
     public static readonly BindableProperty MaxRetryCountProperty = BindableProperty.Create(
         nameof(MaxRetryCount),
         typeof(int),
         typeof(SmartImage),
         2,
-        BindingMode.OneWay);
+        BindingMode.OneWay,
+        validateValue: (_, value) => value is int count && count >= 0);
 
+    /// <summary>Bindable property for <see cref="EnableAutomaticRetry"/>.</summary>
     public static readonly BindableProperty EnableAutomaticRetryProperty = BindableProperty.Create(
         nameof(EnableAutomaticRetry),
         typeof(bool),
@@ -77,13 +95,16 @@ public partial class SmartImage : ContentView
         true,
         BindingMode.OneWay);
 
+    /// <summary>Bindable property for <see cref="RetryDelay"/>.</summary>
     public static readonly BindableProperty RetryDelayProperty = BindableProperty.Create(
         nameof(RetryDelay),
         typeof(TimeSpan),
         typeof(SmartImage),
         TimeSpan.FromSeconds(1),
-        BindingMode.OneWay);
+        BindingMode.OneWay,
+        validateValue: (_, value) => value is TimeSpan delay && delay >= TimeSpan.Zero);
 
+    /// <summary>Bindable property for <see cref="EnableFadeAnimation"/>.</summary>
     public static readonly BindableProperty EnableFadeAnimationProperty = BindableProperty.Create(
         nameof(EnableFadeAnimation),
         typeof(bool),
@@ -91,6 +112,7 @@ public partial class SmartImage : ContentView
         true,
         BindingMode.OneWay);
 
+    /// <summary>Bindable property for <see cref="Aspect"/>.</summary>
     public static readonly BindableProperty AspectProperty = BindableProperty.Create(
         nameof(Aspect),
         typeof(Aspect),
@@ -99,6 +121,7 @@ public partial class SmartImage : ContentView
         BindingMode.OneWay,
         propertyChanged: AspectPropertyChanged);
 
+    /// <summary>Bindable property for <see cref="RetryButtonText"/>.</summary>
     public static readonly BindableProperty RetryButtonTextProperty = BindableProperty.Create(
         nameof(RetryButtonText),
         typeof(string),
@@ -106,6 +129,7 @@ public partial class SmartImage : ContentView
         "Retry",
         BindingMode.OneWay);
 
+    /// <summary>Bindable property for <see cref="RetryOverlayBackgroundColor"/>.</summary>
     public static readonly BindableProperty RetryOverlayBackgroundColorProperty = BindableProperty.Create(
         nameof(RetryOverlayBackgroundColor),
         typeof(Color),
@@ -113,6 +137,7 @@ public partial class SmartImage : ContentView
         Color.FromArgb("#E5E7EB"),
         BindingMode.OneWay);
 
+    /// <summary>Bindable property for <see cref="RetryButtonTextColor"/>.</summary>
     public static readonly BindableProperty RetryButtonTextColorProperty = BindableProperty.Create(
         nameof(RetryButtonTextColor),
         typeof(Color),
@@ -120,6 +145,7 @@ public partial class SmartImage : ContentView
         Color.FromArgb("#374151"),
         BindingMode.OneWay);
 
+    /// <summary>Bindable property for <see cref="RetryButtonFontSize"/>.</summary>
     public static readonly BindableProperty RetryButtonFontSizeProperty = BindableProperty.Create(
         nameof(RetryButtonFontSize),
         typeof(double),
@@ -127,6 +153,7 @@ public partial class SmartImage : ContentView
         12.0,
         BindingMode.OneWay);
 
+    /// <summary>Bindable property for <see cref="SkeletonColor"/>.</summary>
     public static readonly BindableProperty SkeletonColorProperty = BindableProperty.Create(
         nameof(SkeletonColor),
         typeof(Color),
@@ -134,6 +161,7 @@ public partial class SmartImage : ContentView
         Color.FromArgb("#E5E7EB"),
         BindingMode.OneWay);
 
+    /// <summary>Bindable property for <see cref="SkeletonHighlightColor"/>.</summary>
     public static readonly BindableProperty SkeletonHighlightColorProperty = BindableProperty.Create(
         nameof(SkeletonHighlightColor),
         typeof(Color),
@@ -148,6 +176,7 @@ public partial class SmartImage : ContentView
         SmartImageState.Idle,
         propertyChanged: StatePropertyChanged);
 
+    /// <summary>Bindable property for <see cref="State"/>.</summary>
     public static readonly BindableProperty StateProperty = StatePropertyKey.BindableProperty;
 
     private static readonly BindablePropertyKey ErrorPropertyKey = BindableProperty.CreateReadOnly(
@@ -156,161 +185,252 @@ public partial class SmartImage : ContentView
         typeof(SmartImage),
         null);
 
+    /// <summary>Bindable property for <see cref="Error"/>.</summary>
     public static readonly BindableProperty ErrorProperty = ErrorPropertyKey.BindableProperty;
 
     private const string ShimmerAnimationName = "Shimmer";
+    private const string MissingRegistrationError =
+        "SmartImage requires builder.UseSmartImage() in MauiProgram.cs before remote sources can load.";
 
     private readonly LoadGenerationGuard _guard = new();
     private CancellationTokenSource? _loadCts;
     private IImageLoader? _imageLoader;
+    private SmartImageOptions? _options;
+    private ILogger<SmartImage> _logger = NullLogger<SmartImage>.Instance;
+    private bool _missingRegistrationReported;
 
+    /// <summary>
+    /// Initializes a new <see cref="SmartImage"/>.
+    /// </summary>
     public SmartImage()
     {
-        RetryCommand = new AsyncRelayCommand(RetryAsync);
+        RetryCommand = new Command(
+            execute: () => _ = SafeRetryAsync(),
+            canExecute: () => State != SmartImageState.Loading);
         InitializeComponent();
     }
 
+    /// <summary>
+    /// Local resource name, local file path, or http(s) URL.
+    /// </summary>
     public string? Source
     {
         get => (string?)GetValue(SourceProperty);
         set => SetValue(SourceProperty, value);
     }
 
+    /// <summary>
+    /// Shown while idle/loading (unless <see cref="KeepPreviousImageWhileLoading"/>) and as a failure fallback.
+    /// </summary>
     public ImageSource? Placeholder
     {
         get => (ImageSource?)GetValue(PlaceholderProperty);
         set => SetValue(PlaceholderProperty, value);
     }
 
+    /// <summary>
+    /// Shown when <see cref="State"/> is <see cref="SmartImageState.Failed"/>.
+    /// </summary>
     public ImageSource? ErrorImage
     {
         get => (ImageSource?)GetValue(ErrorImageProperty);
         set => SetValue(ErrorImageProperty, value);
     }
 
+    /// <summary>
+    /// When <see langword="true"/>, keeps the previously loaded image visible while a new load is in flight.
+    /// </summary>
     public bool KeepPreviousImageWhileLoading
     {
         get => (bool)GetValue(KeepPreviousImageWhileLoadingProperty);
         set => SetValue(KeepPreviousImageWhileLoadingProperty, value);
     }
 
+    /// <summary>
+    /// Cache tiers used for remote sources.
+    /// </summary>
     public ImageCachePolicy CachePolicy
     {
         get => (ImageCachePolicy)GetValue(CachePolicyProperty);
         set => SetValue(CachePolicyProperty, value);
     }
 
+    /// <summary>
+    /// Cache entry lifetime. When <see langword="null"/>, <see cref="SmartImageOptions.DefaultCacheDuration"/> is used.
+    /// </summary>
     public TimeSpan? CacheDuration
     {
         get => (TimeSpan?)GetValue(CacheDurationProperty);
         set => SetValue(CacheDurationProperty, value);
     }
 
+    /// <summary>
+    /// Per-attempt download timeout. When <see langword="null"/>, <see cref="SmartImageOptions.DefaultTimeout"/> is used.
+    /// </summary>
     public TimeSpan? Timeout
     {
         get => (TimeSpan?)GetValue(TimeoutProperty);
         set => SetValue(TimeoutProperty, value);
     }
 
+    /// <summary>
+    /// Maximum accepted download size. When <see langword="null"/>, <see cref="SmartImageOptions.DefaultMaxImageSizeBytes"/> is used.
+    /// </summary>
     public long? MaxImageSizeBytes
     {
         get => (long?)GetValue(MaxImageSizeBytesProperty);
         set => SetValue(MaxImageSizeBytesProperty, value);
     }
 
+    /// <summary>
+    /// Number of automatic retries after the first attempt.
+    /// </summary>
     public int MaxRetryCount
     {
         get => (int)GetValue(MaxRetryCountProperty);
         set => SetValue(MaxRetryCountProperty, value);
     }
 
+    /// <summary>
+    /// Whether transient remote failures should be retried automatically.
+    /// </summary>
     public bool EnableAutomaticRetry
     {
         get => (bool)GetValue(EnableAutomaticRetryProperty);
         set => SetValue(EnableAutomaticRetryProperty, value);
     }
 
+    /// <summary>
+    /// Base delay for exponential backoff between automatic retries.
+    /// </summary>
     public TimeSpan RetryDelay
     {
         get => (TimeSpan)GetValue(RetryDelayProperty);
         set => SetValue(RetryDelayProperty, value);
     }
 
+    /// <summary>
+    /// Whether to fade when swapping to a newly loaded remote image.
+    /// </summary>
     public bool EnableFadeAnimation
     {
         get => (bool)GetValue(EnableFadeAnimationProperty);
         set => SetValue(EnableFadeAnimationProperty, value);
     }
 
+    /// <summary>
+    /// Aspect mode passed through to the inner <see cref="Image"/>.
+    /// </summary>
     public Aspect Aspect
     {
         get => (Aspect)GetValue(AspectProperty);
         set => SetValue(AspectProperty, value);
     }
 
+    /// <summary>
+    /// Text of the built-in retry overlay.
+    /// </summary>
     public string RetryButtonText
     {
         get => (string)GetValue(RetryButtonTextProperty);
         set => SetValue(RetryButtonTextProperty, value);
     }
 
+    /// <summary>
+    /// Background color of the built-in retry overlay.
+    /// </summary>
     public Color RetryOverlayBackgroundColor
     {
         get => (Color)GetValue(RetryOverlayBackgroundColorProperty);
         set => SetValue(RetryOverlayBackgroundColorProperty, value);
     }
 
+    /// <summary>
+    /// Text color of the built-in retry overlay.
+    /// </summary>
     public Color RetryButtonTextColor
     {
         get => (Color)GetValue(RetryButtonTextColorProperty);
         set => SetValue(RetryButtonTextColorProperty, value);
     }
 
+    /// <summary>
+    /// Font size of the built-in retry overlay text.
+    /// </summary>
     public double RetryButtonFontSize
     {
         get => (double)GetValue(RetryButtonFontSizeProperty);
         set => SetValue(RetryButtonFontSizeProperty, value);
     }
 
+    /// <summary>
+    /// Base color of the shimmering skeleton placeholder.
+    /// </summary>
     public Color SkeletonColor
     {
         get => (Color)GetValue(SkeletonColorProperty);
         set => SetValue(SkeletonColorProperty, value);
     }
 
+    /// <summary>
+    /// Highlight color of the shimmering skeleton placeholder.
+    /// </summary>
     public Color SkeletonHighlightColor
     {
         get => (Color)GetValue(SkeletonHighlightColorProperty);
         set => SetValue(SkeletonHighlightColorProperty, value);
     }
 
+    /// <summary>
+    /// Current load state.
+    /// </summary>
     public SmartImageState State
     {
         get => (SmartImageState)GetValue(StateProperty);
         private set => SetValue(StatePropertyKey, value);
     }
 
+    /// <summary>
+    /// Failure message when <see cref="State"/> is <see cref="SmartImageState.Failed"/>.
+    /// </summary>
     public string? Error
     {
         get => (string?)GetValue(ErrorProperty);
         private set => SetValue(ErrorPropertyKey, value);
     }
 
+    /// <summary>
+    /// Command that re-attempts the current <see cref="Source"/>.
+    /// </summary>
     public ICommand RetryCommand { get; }
 
+    /// <summary>
+    /// <see langword="true"/> when <see cref="State"/> is <see cref="SmartImageState.Loading"/>.
+    /// </summary>
     public bool IsLoading => State == SmartImageState.Loading;
 
+    /// <summary>
+    /// <see langword="true"/> when <see cref="State"/> is <see cref="SmartImageState.Failed"/>.
+    /// </summary>
     public bool IsFailed => State == SmartImageState.Failed;
 
+    /// <inheritdoc />
     protected override void OnHandlerChanged()
     {
         base.OnHandlerChanged();
 
         if (Handler is not null)
         {
-            _imageLoader ??= Handler.MauiContext?.Services.GetService<IImageLoader>();
+            IServiceProvider? services = Handler.MauiContext?.Services;
+            _imageLoader ??= services?.GetService<IImageLoader>();
+            _options ??= services?.GetService<SmartImageOptions>();
+            _logger = services?.GetService<ILogger<SmartImage>>() ?? NullLogger<SmartImage>.Instance;
 
-            if (_imageLoader is not null)
+            if (_imageLoader is null)
+            {
+                ReportMissingRegistration();
+            }
+            else
             {
                 OnSourceChanged(Source);
             }
@@ -325,11 +445,49 @@ public partial class SmartImage : ContentView
         }
     }
 
+    private void ReportMissingRegistration()
+    {
+        if (_missingRegistrationReported)
+        {
+            return;
+        }
+
+        _missingRegistrationReported = true;
+        _logger.LogError(MissingRegistrationError);
+        Debug.Fail(MissingRegistrationError);
+
+        if (ImageSourceClassifier.Classify(Source) == ImageSourceKind.Remote)
+        {
+            ApplyFailed(MissingRegistrationError);
+        }
+    }
+
     private static void SourcePropertyChanged(BindableObject bindable, object oldValue, object? newValue)
     {
         if (bindable is SmartImage smartImage)
         {
             smartImage.OnSourceChanged((string?)newValue);
+        }
+    }
+
+    private static void PlaceholderOrErrorImageChanged(BindableObject bindable, object oldValue, object? newValue)
+    {
+        if (bindable is not SmartImage smartImage)
+        {
+            return;
+        }
+
+        if (smartImage.State == SmartImageState.Idle)
+        {
+            smartImage.PART_Image.Source = smartImage.Placeholder;
+        }
+        else if (smartImage.State == SmartImageState.Failed)
+        {
+            smartImage.PART_Image.Source = smartImage.ErrorImage ?? smartImage.Placeholder;
+        }
+        else if (smartImage.State == SmartImageState.Loading && !smartImage.KeepPreviousImageWhileLoading)
+        {
+            smartImage.PART_Image.Source = smartImage.Placeholder;
         }
     }
 
@@ -347,6 +505,7 @@ public partial class SmartImage : ContentView
         {
             smartImage.OnPropertyChanged(nameof(IsLoading));
             smartImage.OnPropertyChanged(nameof(IsFailed));
+            ((Command)smartImage.RetryCommand).ChangeCanExecute();
 
             if (smartImage.State == SmartImageState.Loading)
             {
@@ -390,7 +549,7 @@ public partial class SmartImage : ContentView
             easing: Easing.Linear,
             finished: (_, cancelled) =>
             {
-                if (!cancelled)
+                if (!cancelled && State == SmartImageState.Loading && Handler is not null)
                 {
                     RunShimmerCycle();
                 }
@@ -405,7 +564,40 @@ public partial class SmartImage : ContentView
         _loadCts?.Dispose();
         _loadCts = new CancellationTokenSource();
 
-        _ = LoadAsync(source, generation, _loadCts.Token);
+        _ = SafeLoadAsync(source, generation, _loadCts.Token);
+    }
+
+    private async Task SafeRetryAsync()
+    {
+        try
+        {
+            await RetryAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "SmartImage retry failed for source {Source}.", Source);
+        }
+    }
+
+    private async Task SafeLoadAsync(string? source, long generation, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await LoadAsync(source, generation, cancellationToken).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            // Source changed or control detached.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SmartImage load failed for source {Source}.", source);
+
+            if (_guard.IsCurrent(generation) && Handler is not null)
+            {
+                ApplyFailed(ex.Message);
+            }
+        }
     }
 
     private async Task RetryAsync()
@@ -450,7 +642,11 @@ public partial class SmartImage : ContentView
 
         if (_imageLoader is null)
         {
-            // No Handler/DI context yet; OnHandlerChanged will retry once the loader becomes available.
+            if (Handler is not null)
+            {
+                ReportMissingRegistration();
+            }
+
             return;
         }
 
@@ -461,13 +657,15 @@ public partial class SmartImage : ContentView
 
         ApplyLoading();
 
+        SmartImageOptions options = _options ?? new SmartImageOptions();
+
         ImageLoadRequest request = new()
         {
             Url = source!,
             CachePolicy = CachePolicy,
-            CacheDuration = CacheDuration,
+            CacheDuration = CacheDuration ?? options.DefaultCacheDuration,
             Timeout = Timeout,
-            MaxImageSizeBytes = MaxImageSizeBytes,
+            MaxImageSizeBytes = MaxImageSizeBytes ?? options.DefaultMaxImageSizeBytes,
             MaxRetryCount = MaxRetryCount,
             EnableAutomaticRetry = EnableAutomaticRetry,
             RetryDelay = RetryDelay
@@ -481,13 +679,11 @@ public partial class SmartImage : ContentView
         }
         catch (OperationCanceledException)
         {
-            // Source changed again (or the control was detached) before this load finished; abandon quietly.
             return;
         }
 
         if (!_guard.IsCurrent(generation))
         {
-            // A newer load has already started; this result is stale and must never overwrite it.
             return;
         }
 
@@ -533,22 +729,32 @@ public partial class SmartImage : ContentView
 
         ImageSource loadedSource = ImageSource.FromStream(_ => Task.FromResult<Stream>(new MemoryStream(imageData)));
 
-        if (EnableFadeAnimation)
+        if (EnableFadeAnimation && Handler is not null)
         {
-            await PART_Image.FadeToAsync(0, 100).ConfigureAwait(true);
-
-            if (!_guard.IsCurrent(generation))
+            try
             {
-                PART_Image.Opacity = 1;
-                return;
-            }
+                await PART_Image.FadeToAsync(0, 100).ConfigureAwait(true);
 
-            PART_Image.Source = loadedSource;
-            await PART_Image.FadeToAsync(1, 150).ConfigureAwait(true);
+                if (!_guard.IsCurrent(generation) || Handler is null)
+                {
+                    PART_Image.Opacity = 1;
+                    return;
+                }
+
+                PART_Image.Source = loadedSource;
+                await PART_Image.FadeToAsync(1, 150).ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "SmartImage fade animation interrupted.");
+                PART_Image.Opacity = 1;
+                PART_Image.Source = loadedSource;
+            }
         }
         else
         {
             PART_Image.Source = loadedSource;
+            PART_Image.Opacity = 1;
         }
     }
 
