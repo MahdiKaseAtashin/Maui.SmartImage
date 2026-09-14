@@ -431,6 +431,8 @@ public partial class SmartImage : ContentView
         _options = options ?? new SmartImageOptions();
         _logger = NullLogger<SmartImage>.Instance;
 
+        UpdateAutomationState();
+
         if (_imageLoader is null)
         {
             ReportMissingRegistration();
@@ -447,10 +449,10 @@ public partial class SmartImage : ContentView
     internal ImageSource? GetDisplayedSourceForTests() => PART_Image.Source;
 
     /// <summary>State-probe AutomationId for UI smoke (unit tests).</summary>
-    internal string? GetStateProbeAutomationIdForTests() => null;
+    internal string? GetStateProbeAutomationIdForTests() => PART_StateProbe.AutomationId;
 
     /// <summary>State-probe text for UI smoke (unit tests).</summary>
-    internal string? GetStateProbeTextForTests() => null;
+    internal string? GetStateProbeTextForTests() => PART_StateProbe.Text;
 
     /// <summary>Retry overlay AutomationId (unit tests).</summary>
     internal string? GetRetryOverlayAutomationIdForTests() => PART_RetryOverlay.AutomationId;
@@ -470,6 +472,8 @@ public partial class SmartImage : ContentView
             _options ??= services?.GetService<SmartImageOptions>();
             _logger = services?.GetService<ILogger<SmartImage>>() ?? NullLogger<SmartImage>.Instance;
 
+            UpdateAutomationState();
+
             if (_imageLoader is null)
             {
                 ReportMissingRegistration();
@@ -486,6 +490,17 @@ public partial class SmartImage : ContentView
             _loadCts?.Dispose();
             _loadCts = null;
             StopShimmer();
+        }
+    }
+
+    /// <inheritdoc />
+    protected override void OnPropertyChanged(string? propertyName = null)
+    {
+        base.OnPropertyChanged(propertyName);
+
+        if (propertyName == AutomationIdProperty.PropertyName)
+        {
+            UpdateAutomationState();
         }
     }
 
@@ -568,8 +583,6 @@ public partial class SmartImage : ContentView
         }
     }
 
-    private string? _automationIdBase;
-
     private void UpdateAutomationState()
     {
         string stateName = State.ToString();
@@ -577,38 +590,80 @@ public partial class SmartImage : ContentView
         AutomationProperties.SetName(this, stateName);
         AutomationProperties.SetHelpText(this, stateName);
 
-        // WinAppDriver often returns null for Name/Description; encode state in AutomationId
-        // so Appium can wait on AccessibilityId (e.g. Smoke.FailedRemote.Failed).
-        string? current = AutomationId;
-        if (string.IsNullOrEmpty(current) && string.IsNullOrEmpty(_automationIdBase))
+        string? baseId = AutomationId;
+        string probeToken = string.IsNullOrEmpty(baseId) ? stateName : $"{baseId}.{stateName}";
+
+        if (!string.IsNullOrEmpty(baseId))
+        {
+            AssignAutomationIdOnce(PART_SkeletonOverlay, $"{baseId}.SkeletonOverlay");
+            AssignAutomationIdOnce(PART_RetryOverlay, $"{baseId}.RetryOverlay");
+        }
+        else if (IsAttached)
+        {
+            AssignAutomationIdOnce(PART_SkeletonOverlay, "SmartImage.SkeletonOverlay");
+            AssignAutomationIdOnce(PART_RetryOverlay, "SmartImage.RetryOverlay");
+        }
+
+        EnsureStateProbe(probeToken);
+
+        if (PART_Root is not null)
+        {
+            AutomationProperties.SetIsInAccessibleTree(PART_Root, true);
+        }
+
+        if (PART_StateProbe is not null)
+        {
+            AutomationProperties.SetIsInAccessibleTree(PART_StateProbe, true);
+        }
+
+        if (PART_RetryOverlay is not null)
+        {
+            AutomationProperties.SetIsInAccessibleTree(PART_RetryOverlay, true);
+        }
+    }
+
+    private void EnsureStateProbe(string probeToken)
+    {
+        if (PART_StateProbe is not null
+            && string.Equals(PART_StateProbe.AutomationId, probeToken, StringComparison.Ordinal)
+            && string.Equals(PART_StateProbe.Text, probeToken, StringComparison.Ordinal))
         {
             return;
         }
 
-        if (string.IsNullOrEmpty(_automationIdBase))
+        Label probe = new()
         {
-            _automationIdBase = StripStateSuffix(current!);
+            Text = probeToken,
+            AutomationId = probeToken,
+            FontSize = 1,
+            HeightRequest = 1,
+            WidthRequest = 1,
+            Opacity = 0.01,
+            InputTransparent = true,
+            HorizontalOptions = LayoutOptions.Start,
+            VerticalOptions = LayoutOptions.Start
+        };
+        AutomationProperties.SetIsInAccessibleTree(probe, true);
+
+        if (PART_Root is not null)
+        {
+            if (PART_StateProbe is not null)
+            {
+                PART_Root.Children.Remove(PART_StateProbe);
+            }
+
+            PART_Root.Children.Add(probe);
         }
 
-        string desired = $"{_automationIdBase}.{stateName}";
-        if (!string.Equals(AutomationId, desired, StringComparison.Ordinal))
-        {
-            AutomationId = desired;
-        }
+        PART_StateProbe = probe;
     }
 
-    private static string StripStateSuffix(string automationId)
+    private static void AssignAutomationIdOnce(Element element, string automationId)
     {
-        foreach (string name in Enum.GetNames<SmartImageState>())
+        if (string.IsNullOrEmpty(element.AutomationId))
         {
-            string suffix = "." + name;
-            if (automationId.EndsWith(suffix, StringComparison.Ordinal))
-            {
-                return automationId[..^suffix.Length];
-            }
+            element.AutomationId = automationId;
         }
-
-        return automationId;
     }
 
     private void StartShimmer()

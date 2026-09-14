@@ -5,7 +5,7 @@
     x:Name="View"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
-    <Grid>
+    <Grid x:Name="PART_Root">
         <Image
             x:Name="PART_Image"
             Aspect="AspectFill"
@@ -14,7 +14,6 @@
 
         <Grid
             x:Name="PART_SkeletonOverlay"
-            AutomationId="SmartImage.SkeletonOverlay"
             IsClippedToBounds="True"
             BackgroundColor="{Binding SkeletonColor, Source={x:Reference View}}"
             IsVisible="{Binding IsLoading, Source={x:Reference View}}">
@@ -35,7 +34,6 @@
 
         <Border
             x:Name="PART_RetryOverlay"
-            AutomationId="SmartImage.RetryOverlay"
             HorizontalOptions="Center"
             VerticalOptions="Center"
             Padding="12,6"
@@ -51,5 +49,16 @@
                 FontSize="{Binding RetryButtonFontSize, Source={x:Reference View}}"
                 TextColor="{Binding RetryButtonTextColor, Source={x:Reference View}}" />
         </Border>
+
+        <Label
+            x:Name="PART_StateProbe"
+            AutomationProperties.IsInAccessibleTree="True"
+            FontSize="1"
+            HeightRequest="1"
+            HorizontalOptions="Start"
+            InputTransparent="True"
+            Opacity="0.01"
+            VerticalOptions="Start"
+            WidthRequest="1" />
     </Grid>
 </ContentView>

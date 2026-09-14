@@ -166,8 +166,7 @@ public class SmartImageTests
     public async Task AutomationId_RemainsStable_WhenStateChanges()
     {
         IImageLoader loader = Substitute.For<IImageLoader>();
-        SmartImageControl image = CreateControl(loader);
-        image.AutomationId = "Smoke.LocalImage";
+        SmartImageControl image = CreateControl(loader, automationId: "Smoke.LocalImage");
 
         image.Source = "dotnet_bot.png";
         await WaitForStateAsync(image, SmartImageState.Loaded);
@@ -185,8 +184,7 @@ public class SmartImageTests
         loader.LoadAsync(Arg.Any<ImageLoadRequest>(), Arg.Any<CancellationToken>())
             .Returns(_ => remoteLoad.Task);
 
-        SmartImageControl image = CreateControl(loader);
-        image.AutomationId = "Smoke.FailedRemote";
+        SmartImageControl image = CreateControl(loader, automationId: "Smoke.FailedRemote");
         image.Source = RemoteUrl;
 
         await WaitForStateAsync(image, SmartImageState.Loading);
@@ -200,11 +198,12 @@ public class SmartImageTests
         image.GetRetryOverlayAutomationIdForTests().Should().Be("Smoke.FailedRemote.RetryOverlay");
     }
 
-    private static SmartImageControl CreateControl(IImageLoader loader)
+    private static SmartImageControl CreateControl(IImageLoader loader, string? automationId = null)
     {
         SmartImageControl image = new()
         {
-            EnableFadeAnimation = false
+            EnableFadeAnimation = false,
+            AutomationId = automationId
         };
         image.AttachForTests(loader);
         return image;
