@@ -27,7 +27,7 @@ public static class MauiAppBuilderExtensions
 
         builder.Services.AddHttpClient<IImageLoader, ImageLoader>(client =>
             {
-                client.Timeout = options.DefaultTimeout;
+                client.Timeout = System.Threading.Timeout.InfiniteTimeSpan;
                 options.ConfigureHttpClient?.Invoke(client);
             })
             .ConfigurePrimaryHttpMessageHandler(options.PrimaryHttpMessageHandlerFactory ?? (() => new HttpClientHandler()));
