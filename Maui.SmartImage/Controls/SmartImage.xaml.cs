@@ -431,8 +431,6 @@ public partial class SmartImage : ContentView
         _options = options ?? new SmartImageOptions();
         _logger = NullLogger<SmartImage>.Instance;
 
-        UpdateAutomationState();
-
         if (_imageLoader is null)
         {
             ReportMissingRegistration();
@@ -448,18 +446,6 @@ public partial class SmartImage : ContentView
     /// </summary>
     internal ImageSource? GetDisplayedSourceForTests() => PART_Image.Source;
 
-    /// <summary>State-probe AutomationId for UI smoke (unit tests).</summary>
-    internal string? GetStateProbeAutomationIdForTests() => PART_StateProbe.AutomationId;
-
-    /// <summary>State-probe text for UI smoke (unit tests).</summary>
-    internal string? GetStateProbeTextForTests() => PART_StateProbe.Text;
-
-    /// <summary>Retry overlay AutomationId (unit tests).</summary>
-    internal string? GetRetryOverlayAutomationIdForTests() => PART_RetryOverlay.AutomationId;
-
-    /// <summary>Skeleton overlay AutomationId (unit tests).</summary>
-    internal string? GetSkeletonOverlayAutomationIdForTests() => PART_SkeletonOverlay.AutomationId;
-
     /// <inheritdoc />
     protected override void OnHandlerChanged()
     {
@@ -471,8 +457,6 @@ public partial class SmartImage : ContentView
             _imageLoader ??= services?.GetService<IImageLoader>();
             _options ??= services?.GetService<SmartImageOptions>();
             _logger = services?.GetService<ILogger<SmartImage>>() ?? NullLogger<SmartImage>.Instance;
-
-            UpdateAutomationState();
 
             if (_imageLoader is null)
             {
@@ -490,17 +474,6 @@ public partial class SmartImage : ContentView
             _loadCts?.Dispose();
             _loadCts = null;
             StopShimmer();
-        }
-    }
-
-    /// <inheritdoc />
-    protected override void OnPropertyChanged(string? propertyName = null)
-    {
-        base.OnPropertyChanged(propertyName);
-
-        if (propertyName == AutomationIdProperty.PropertyName)
-        {
-            UpdateAutomationState();
         }
     }
 
@@ -589,81 +562,6 @@ public partial class SmartImage : ContentView
         SemanticProperties.SetDescription(this, stateName);
         AutomationProperties.SetName(this, stateName);
         AutomationProperties.SetHelpText(this, stateName);
-
-        string? baseId = AutomationId;
-        string probeToken = string.IsNullOrEmpty(baseId) ? stateName : $"{baseId}.{stateName}";
-
-        if (!string.IsNullOrEmpty(baseId))
-        {
-            AssignAutomationIdOnce(PART_SkeletonOverlay, $"{baseId}.SkeletonOverlay");
-            AssignAutomationIdOnce(PART_RetryOverlay, $"{baseId}.RetryOverlay");
-        }
-        else if (IsAttached)
-        {
-            AssignAutomationIdOnce(PART_SkeletonOverlay, "SmartImage.SkeletonOverlay");
-            AssignAutomationIdOnce(PART_RetryOverlay, "SmartImage.RetryOverlay");
-        }
-
-        EnsureStateProbe(probeToken);
-
-        if (PART_Root is not null)
-        {
-            AutomationProperties.SetIsInAccessibleTree(PART_Root, true);
-        }
-
-        if (PART_StateProbe is not null)
-        {
-            AutomationProperties.SetIsInAccessibleTree(PART_StateProbe, true);
-        }
-
-        if (PART_RetryOverlay is not null)
-        {
-            AutomationProperties.SetIsInAccessibleTree(PART_RetryOverlay, true);
-        }
-    }
-
-    private void EnsureStateProbe(string probeToken)
-    {
-        if (PART_StateProbe is not null
-            && string.Equals(PART_StateProbe.AutomationId, probeToken, StringComparison.Ordinal)
-            && string.Equals(PART_StateProbe.Text, probeToken, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        Label probe = new()
-        {
-            Text = probeToken,
-            AutomationId = probeToken,
-            FontSize = 1,
-            HeightRequest = 1,
-            WidthRequest = 1,
-            Opacity = 0.01,
-            InputTransparent = true,
-            HorizontalOptions = LayoutOptions.Start,
-            VerticalOptions = LayoutOptions.Start
-        };
-        AutomationProperties.SetIsInAccessibleTree(probe, true);
-
-        if (PART_Root is not null)
-        {
-            if (PART_StateProbe is not null)
-            {
-                PART_Root.Children.Remove(PART_StateProbe);
-            }
-
-            PART_Root.Children.Add(probe);
-        }
-
-        PART_StateProbe = probe;
-    }
-
-    private static void AssignAutomationIdOnce(Element element, string automationId)
-    {
-        if (string.IsNullOrEmpty(element.AutomationId))
-        {
-            element.AutomationId = automationId;
-        }
     }
 
     private void StartShimmer()

@@ -162,48 +162,11 @@ public class SmartImageTests
         await WaitForStateAsync(image, SmartImageState.Loaded);
     }
 
-    [Fact]
-    public async Task AutomationId_RemainsStable_WhenStateChanges()
-    {
-        IImageLoader loader = Substitute.For<IImageLoader>();
-        SmartImageControl image = CreateControl(loader, automationId: "Smoke.LocalImage");
-
-        image.Source = "dotnet_bot.png";
-        await WaitForStateAsync(image, SmartImageState.Loaded);
-
-        image.AutomationId.Should().Be("Smoke.LocalImage");
-        image.GetStateProbeAutomationIdForTests().Should().Be("Smoke.LocalImage.Loaded");
-        image.GetStateProbeTextForTests().Should().Be("Smoke.LocalImage.Loaded");
-    }
-
-    [Fact]
-    public async Task OverlayAutomationIds_ArePrefixedWithConsumerAutomationId()
-    {
-        TaskCompletionSource<ImageLoadResult> remoteLoad = new();
-        IImageLoader loader = Substitute.For<IImageLoader>();
-        loader.LoadAsync(Arg.Any<ImageLoadRequest>(), Arg.Any<CancellationToken>())
-            .Returns(_ => remoteLoad.Task);
-
-        SmartImageControl image = CreateControl(loader, automationId: "Smoke.FailedRemote");
-        image.Source = RemoteUrl;
-
-        await WaitForStateAsync(image, SmartImageState.Loading);
-        image.GetSkeletonOverlayAutomationIdForTests().Should().Be("Smoke.FailedRemote.SkeletonOverlay");
-
-        remoteLoad.SetResult(ImageLoadResult.Failure(ImageLoadErrorKind.HttpError, "not found", 404));
-        await WaitForStateAsync(image, SmartImageState.Failed);
-
-        image.AutomationId.Should().Be("Smoke.FailedRemote");
-        image.GetStateProbeAutomationIdForTests().Should().Be("Smoke.FailedRemote.Failed");
-        image.GetRetryOverlayAutomationIdForTests().Should().Be("Smoke.FailedRemote.RetryOverlay");
-    }
-
-    private static SmartImageControl CreateControl(IImageLoader loader, string? automationId = null)
+    private static SmartImageControl CreateControl(IImageLoader loader)
     {
         SmartImageControl image = new()
         {
-            EnableFadeAnimation = false,
-            AutomationId = automationId
+            EnableFadeAnimation = false
         };
         image.AttachForTests(loader);
         return image;
