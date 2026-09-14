@@ -1,6 +1,9 @@
 namespace Maui.SmartImage.Services;
 
-public enum ImageSourceKind
+/// <summary>
+/// Classification of a SmartImage source string.
+/// </summary>
+internal enum ImageSourceKind
 {
     Empty,
     Local,

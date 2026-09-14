@@ -1,6 +1,9 @@
 namespace Maui.SmartImage.Services;
 
-public static class ImageSourceClassifier
+/// <summary>
+/// Classifies a <see cref="Controls.SmartImage.Source"/> string as empty, local, or remote.
+/// </summary>
+internal static class ImageSourceClassifier
 {
     public static ImageSourceKind Classify(string? source)
     {

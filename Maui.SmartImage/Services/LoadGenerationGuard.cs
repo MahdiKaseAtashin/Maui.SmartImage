@@ -1,6 +1,9 @@
 namespace Maui.SmartImage.Services;
 
-public sealed class LoadGenerationGuard
+/// <summary>
+/// Prevents stale async loads from overwriting newer UI state.
+/// </summary>
+internal sealed class LoadGenerationGuard
 {
     private long _current;
 
