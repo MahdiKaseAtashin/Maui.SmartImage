@@ -43,7 +43,7 @@ CI runs UI-state smoke on every PR via [`.github/workflows/smoke-ui.yml`](.githu
 
 ```sh
 # Windows (example)
-dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 -p:SMARTIMAGE_SMOKE=true -o artifacts/windows-app
+dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj -c Release -f net10.0-windows10.0.19041.0 -p:SMARTIMAGE_SMOKE=true -p:WindowsPackageType=None -p:RuntimeIdentifierOverride=win-x64 -p:UseMonoRuntime=false -o artifacts/windows-app
 
 # Android (example)
 dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj -c Release -f net10.0-android -p:SMARTIMAGE_SMOKE=true -p:TargetFrameworks=net10.0-android
