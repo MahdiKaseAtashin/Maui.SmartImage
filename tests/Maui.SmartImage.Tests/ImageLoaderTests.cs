@@ -1,9 +1,10 @@
-using Xunit;
 using System.Net;
 using System.Security.Authentication;
-using Maui.SmartImage.Services;
 using FluentAssertions;
+using Maui.SmartImage;
+using Maui.SmartImage.Services;
 using NSubstitute;
+using Xunit;
 
 namespace Maui.SmartImage.Tests;
 
@@ -267,6 +268,96 @@ public class ImageLoaderTests
 
         result.IsSuccess.Should().BeFalse();
         handler.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task LoadAsync_WithHttp404_DoesNotRetry()
+    {
+        FakeHttpMessageHandler handler = new((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)));
+        ImageLoader loader = CreateLoader(handler);
+        ImageLoadRequest request = new()
+        {
+            Url = ImageUrl,
+            EnableAutomaticRetry = true,
+            MaxRetryCount = 3,
+            RetryDelay = TimeSpan.FromMilliseconds(1)
+        };
+
+        ImageLoadResult result = await loader.LoadAsync(request, CancellationToken.None);
+
+        result.ErrorKind.Should().Be(ImageLoadErrorKind.HttpError);
+        result.HttpStatusCode.Should().Be(404);
+        handler.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task LoadAsync_WithHttp503_IsRetried()
+    {
+        FakeHttpMessageHandler handler = new((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        ImageLoader loader = CreateLoader(handler);
+        ImageLoadRequest request = new()
+        {
+            Url = ImageUrl,
+            EnableAutomaticRetry = true,
+            MaxRetryCount = 2,
+            RetryDelay = TimeSpan.FromMilliseconds(1)
+        };
+
+        ImageLoadResult result = await loader.LoadAsync(request, CancellationToken.None);
+
+        result.ErrorKind.Should().Be(ImageLoadErrorKind.HttpError);
+        result.HttpStatusCode.Should().Be(503);
+        handler.CallCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task LoadAsync_WithSslError_DoesNotRetry()
+    {
+        FakeHttpMessageHandler handler = new((_, _) =>
+            throw new HttpRequestException("SSL failure", new AuthenticationException("bad cert")));
+        ImageLoader loader = CreateLoader(handler);
+        ImageLoadRequest request = new()
+        {
+            Url = ImageUrl,
+            EnableAutomaticRetry = true,
+            MaxRetryCount = 3,
+            RetryDelay = TimeSpan.FromMilliseconds(1)
+        };
+
+        ImageLoadResult result = await loader.LoadAsync(request, CancellationToken.None);
+
+        result.ErrorKind.Should().Be(ImageLoadErrorKind.SslError);
+        handler.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task LoadAsync_WhenMaxImageSizeBytesNull_AppliesOptionsDefault()
+    {
+        byte[] largeBytes = new byte[200];
+        Array.Copy(ValidPngBytes, largeBytes, ValidPngBytes.Length);
+
+        FakeHttpMessageHandler handler = new((_, _) =>
+        {
+            HttpResponseMessage response = new(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new MemoryStream(largeBytes))
+            };
+            return Task.FromResult(response);
+        });
+
+        HttpClient httpClient = new(handler);
+        ImageLoader loader = new(
+            httpClient,
+            _cache,
+            new SmartImageOptions { DefaultMaxImageSizeBytes = 50 });
+
+        ImageLoadResult result = await loader.LoadAsync(
+            new ImageLoadRequest { Url = ImageUrl, MaxImageSizeBytes = null, EnableAutomaticRetry = false },
+            CancellationToken.None);
+
+        result.ErrorKind.Should().Be(ImageLoadErrorKind.TooLarge);
     }
 
     [Fact]

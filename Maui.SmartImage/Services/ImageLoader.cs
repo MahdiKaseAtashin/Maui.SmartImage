@@ -1,26 +1,42 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Security.Authentication;
-using Maui.SmartImage;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Maui.SmartImage.Services;
 
+/// <summary>
+/// Default <see cref="IImageLoader"/> with cache lookup, in-flight deduplication, and retry/backoff.
+/// </summary>
 public sealed class ImageLoader : IImageLoader
 {
     private readonly HttpClient _httpClient;
     private readonly IImageCache _cache;
     private readonly SmartImageOptions _options;
+    private readonly ILogger<ImageLoader> _logger;
     private readonly ConcurrentDictionary<string, Lazy<Task<ImageLoadResult>>> _inFlightDownloads = new();
+    private readonly Random _jitter = new();
 
-    public ImageLoader(HttpClient httpClient, IImageCache cache, SmartImageOptions options)
+    /// <summary>
+    /// Creates a new image loader.
+    /// </summary>
+    public ImageLoader(
+        HttpClient httpClient,
+        IImageCache cache,
+        SmartImageOptions options,
+        ILogger<ImageLoader>? logger = null)
     {
         _httpClient = httpClient;
         _cache = cache;
         _options = options;
+        _logger = logger ?? NullLogger<ImageLoader>.Instance;
     }
 
+    /// <inheritdoc />
     public async Task<ImageLoadResult> LoadAsync(ImageLoadRequest request, CancellationToken cancellationToken)
     {
-        if (!TryValidateUri(request.Url, out Uri? uri))
+        if (!TryValidateUri(request.Url, out Uri uri))
         {
             return ImageLoadResult.Failure(ImageLoadErrorKind.InvalidUrl, $"'{request.Url}' is not a valid http(s) image URL.");
         }
@@ -48,43 +64,76 @@ public sealed class ImageLoader : IImageLoader
         return await lazyDownload.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<ImageLoadResult> DownloadWithRetryAsync(ImageLoadRequest request, Uri uri, string cacheKey, string inFlightKey)
+    private async Task<ImageLoadResult> DownloadWithRetryAsync(
+        ImageLoadRequest request,
+        Uri uri,
+        string cacheKey,
+        string inFlightKey)
     {
         try
         {
-            int maxAttempts = request.EnableAutomaticRetry ? request.MaxRetryCount + 1 : 1;
+            int maxAttempts = request.EnableAutomaticRetry ? Math.Max(1, request.MaxRetryCount + 1) : 1;
+            TimeSpan perAttemptTimeout = request.Timeout ?? _options.DefaultTimeout;
+            TimeSpan overallBudget = CalculateOverallBudget(perAttemptTimeout, request.RetryDelay, maxAttempts);
+
+            using CancellationTokenSource overallCts = new(overallBudget);
             ImageLoadResult lastResult = ImageLoadResult.Failure(ImageLoadErrorKind.Unknown);
 
             for (int attempt = 0; attempt < maxAttempts; attempt++)
             {
-                if (attempt > 0)
+                if (overallCts.IsCancellationRequested)
                 {
-                    double backoffMultiplier = Math.Pow(2, attempt - 1);
-                    TimeSpan delay = TimeSpan.FromMilliseconds(request.RetryDelay.TotalMilliseconds * backoffMultiplier);
-                    await Task.Delay(delay).ConfigureAwait(false);
+                    return ImageLoadResult.Failure(ImageLoadErrorKind.Timeout, "Overall download budget exceeded.");
                 }
 
-                lastResult = await DownloadOnceAsync(request, uri).ConfigureAwait(false);
+                if (attempt > 0)
+                {
+                    TimeSpan delay = CalculateBackoffDelay(request.RetryDelay, attempt);
+
+                    try
+                    {
+                        await Task.Delay(delay, overallCts.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return ImageLoadResult.Failure(ImageLoadErrorKind.Timeout, "Overall download budget exceeded during retry delay.");
+                    }
+                }
+
+                lastResult = await DownloadOnceAsync(request, uri, perAttemptTimeout, overallCts.Token).ConfigureAwait(false);
 
                 if (lastResult.IsSuccess)
                 {
+                    TimeSpan? cacheDuration = request.CacheDuration ?? _options.DefaultCacheDuration;
+
                     if (request.CachePolicy != ImageCachePolicy.None)
                     {
                         await _cache.SetAsync(
                             cacheKey,
                             lastResult.ImageData!,
                             request.CachePolicy,
-                            request.CacheDuration,
+                            cacheDuration,
                             CancellationToken.None).ConfigureAwait(false);
                     }
 
                     return lastResult;
                 }
 
-                if (!IsRetryable(lastResult.ErrorKind))
+                if (!IsRetryable(lastResult))
                 {
+                    _logger.LogDebug(
+                        "Image download for {Url} failed with non-retryable error {ErrorKind} (HTTP {StatusCode}).",
+                        request.Url,
+                        lastResult.ErrorKind,
+                        lastResult.HttpStatusCode);
                     return lastResult;
                 }
+
+                _logger.LogDebug(
+                    "Image download for {Url} attempt {Attempt} failed with {ErrorKind}; retrying.",
+                    request.Url,
+                    attempt + 1,
+                    lastResult.ErrorKind);
             }
 
             return lastResult;
@@ -93,6 +142,33 @@ public sealed class ImageLoader : IImageLoader
         {
             _inFlightDownloads.TryRemove(inFlightKey, out _);
         }
+    }
+
+    private TimeSpan CalculateBackoffDelay(TimeSpan baseDelay, int attempt)
+    {
+        double backoffMultiplier = Math.Pow(2, attempt - 1);
+        double baseMs = Math.Max(0, baseDelay.TotalMilliseconds) * backoffMultiplier;
+        double jitterMs;
+
+        lock (_jitter)
+        {
+            jitterMs = _jitter.NextDouble() * Math.Max(1, baseMs * 0.2);
+        }
+
+        return TimeSpan.FromMilliseconds(baseMs + jitterMs);
+    }
+
+    private static TimeSpan CalculateOverallBudget(TimeSpan perAttemptTimeout, TimeSpan retryDelay, int maxAttempts)
+    {
+        double retryDelayTotalMs = 0;
+
+        for (int attempt = 1; attempt < maxAttempts; attempt++)
+        {
+            retryDelayTotalMs += retryDelay.TotalMilliseconds * Math.Pow(2, attempt - 1) * 1.2;
+        }
+
+        double totalMs = (perAttemptTimeout.TotalMilliseconds * maxAttempts) + retryDelayTotalMs;
+        return TimeSpan.FromMilliseconds(Math.Max(perAttemptTimeout.TotalMilliseconds, totalMs));
     }
 
     private static string BuildInFlightKey(ImageLoadRequest request)
@@ -108,9 +184,16 @@ public sealed class ImageLoader : IImageLoader
             request.RetryDelay);
     }
 
-    private async Task<ImageLoadResult> DownloadOnceAsync(ImageLoadRequest request, Uri uri)
+    private async Task<ImageLoadResult> DownloadOnceAsync(
+        ImageLoadRequest request,
+        Uri uri,
+        TimeSpan perAttemptTimeout,
+        CancellationToken overallToken)
     {
-        using CancellationTokenSource timeoutCts = new(request.Timeout ?? _options.DefaultTimeout);
+        using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(overallToken);
+        timeoutCts.CancelAfter(perAttemptTimeout);
+
+        long? maxBytes = request.MaxImageSizeBytes ?? _options.DefaultMaxImageSizeBytes;
 
         try
         {
@@ -120,29 +203,37 @@ public sealed class ImageLoader : IImageLoader
 
             if (!response.IsSuccessStatusCode)
             {
-                return ImageLoadResult.Failure(ImageLoadErrorKind.HttpError, $"HTTP {(int)response.StatusCode}");
+                int statusCode = (int)response.StatusCode;
+                return ImageLoadResult.Failure(
+                    ImageLoadErrorKind.HttpError,
+                    $"HTTP {statusCode}",
+                    statusCode);
             }
 
-            if (request.MaxImageSizeBytes is long maxBytesFromHeader &&
+            if (maxBytes is long maxBytesFromHeader &&
                 response.Content.Headers.ContentLength is long contentLength &&
                 contentLength > maxBytesFromHeader)
             {
                 return ImageLoadResult.Failure(ImageLoadErrorKind.TooLarge);
             }
 
-            byte[]? data = await ReadBoundedAsync(response, request.MaxImageSizeBytes, timeoutCts.Token).ConfigureAwait(false);
+            byte[]? data = await ReadBoundedAsync(response, maxBytes, timeoutCts.Token).ConfigureAwait(false);
 
             if (data is null)
             {
                 return ImageLoadResult.Failure(ImageLoadErrorKind.TooLarge);
             }
 
-            if (!IsRecognizedImage(data))
+            if (!ImageSignature.IsRecognizedImage(data))
             {
                 return ImageLoadResult.Failure(ImageLoadErrorKind.CorruptedData);
             }
 
             return ImageLoadResult.Success(data);
+        }
+        catch (OperationCanceledException) when (overallToken.IsCancellationRequested)
+        {
+            return ImageLoadResult.Failure(ImageLoadErrorKind.Timeout, "Overall download budget exceeded.");
         }
         catch (OperationCanceledException)
         {
@@ -197,50 +288,21 @@ public sealed class ImageLoader : IImageLoader
         return isValid;
     }
 
-    private static bool IsRetryable(ImageLoadErrorKind? kind)
+    private static bool IsRetryable(ImageLoadResult result)
     {
-        return kind is ImageLoadErrorKind.Timeout
-            or ImageLoadErrorKind.NetworkError
-            or ImageLoadErrorKind.HttpError
-            or ImageLoadErrorKind.SslError;
+        return result.ErrorKind switch
+        {
+            ImageLoadErrorKind.Timeout => true,
+            ImageLoadErrorKind.NetworkError => true,
+            ImageLoadErrorKind.HttpError => IsTransientHttpStatus(result.HttpStatusCode),
+            _ => false
+        };
     }
 
-    private static bool IsRecognizedImage(byte[] data)
+    private static bool IsTransientHttpStatus(int? statusCode)
     {
-        if (data.Length < 4)
-        {
-            return false;
-        }
-
-        if (data.Length >= 8 &&
-            data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 &&
-            data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A)
-        {
-            return true; // PNG
-        }
-
-        if (data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF)
-        {
-            return true; // JPEG
-        }
-
-        if (data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x38)
-        {
-            return true; // GIF87a / GIF89a
-        }
-
-        if (data[0] == 0x42 && data[1] == 0x4D)
-        {
-            return true; // BMP
-        }
-
-        if (data.Length >= 12 &&
-            data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46 &&
-            data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50)
-        {
-            return true; // WebP (RIFF....WEBP)
-        }
-
-        return false;
+        return statusCode is (int)HttpStatusCode.RequestTimeout
+            or (int)HttpStatusCode.TooManyRequests
+            or >= 500 and < 600;
     }
 }
