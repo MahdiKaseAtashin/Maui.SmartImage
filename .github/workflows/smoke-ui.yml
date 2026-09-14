@@ -44,12 +44,15 @@ jobs:
       - name: Publish sample (Windows smoke)
         shell: pwsh
         run: |
+          # Avoid `-r win-x64` — it pulls a missing Mono.win-x64 runtime pack.
+          # RuntimeIdentifierOverride keeps a native WinUI output without Mono restore.
           dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj `
             -c Release `
             -f net10.0-windows10.0.19041.0 `
-            -r win-x64 `
             -p:SMARTIMAGE_SMOKE=true `
             -p:WindowsPackageType=None `
+            -p:RuntimeIdentifierOverride=win-x64 `
+            -p:UseMonoRuntime=false `
             -o artifacts/windows-app
 
       - name: Start Appium
@@ -103,13 +106,13 @@ jobs:
           npm install -g appium
           appium driver install uiautomator2
 
-      # Pin android-x64 so restore does not ask for host Mono.osx-arm64 packs.
+      # macos-14 is Apple Silicon — use android-arm64 + arm64-v8a emulator image.
       - name: Publish sample (Android smoke)
         run: |
           dotnet publish samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj \
             -c Release \
             -f net10.0-android \
-            -r android-x64 \
+            -r android-arm64 \
             -p:SMARTIMAGE_SMOKE=true \
             -p:TargetFrameworks=net10.0-android \
             -p:AndroidPackageFormats=apk
@@ -130,7 +133,7 @@ jobs:
         with:
           api-level: 30
           target: google_apis
-          arch: x86_64
+          arch: arm64-v8a
           profile: pixel_6
           force-avd-creation: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
@@ -165,7 +168,8 @@ jobs:
       - name: Select Xcode 26
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '26.1'
+          # Microsoft.iOS/MacCatalyst 26.0.x requires Xcode 26.0 (not 26.1.x).
+          xcode-version: '26.0'
 
       - name: Ensure iOS platform / simulator runtime
         run: |
@@ -254,7 +258,8 @@ jobs:
       - name: Select Xcode 26
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '26.1'
+          # Microsoft.iOS/MacCatalyst 26.0.x requires Xcode 26.0 (not 26.1.x).
+          xcode-version: '26.0'
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
