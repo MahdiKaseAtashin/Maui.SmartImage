@@ -106,8 +106,9 @@ jobs:
 
   android:
     # Linux + KVM is far more reliable for x86_64 emulators than Apple Silicon hosts.
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Pin 22.04 — ubuntu-latest (24.04) has had intermittent emulator/QEMU hangs.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -162,24 +163,34 @@ jobs:
           echo "Found APK: $APK"
           test -n "$APK"
 
+      # Avoid hardware profiles (e.g. pixel_6) — they commonly hang QEMU on GHA runners.
+      # See: https://github.com/ReactiveCircus/android-emulator-runner/issues/431
       - name: Run Android emulator + UI smoke
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
           target: google_apis
           arch: x86_64
-          profile: pixel_6
           force-avd-creation: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          emulator-boot-timeout: 300
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -no-snapshot-save -camera-back none
           disable-animations: true
           script: |
-            set -e
+            set -euo pipefail
             appium --port ${{ env.APPIUM_PORT }} --log "$GITHUB_WORKSPACE/appium-android.log" --log-level info &
-            sleep 10
+            for i in $(seq 1 30); do
+              if curl -sf "http://127.0.0.1:${{ env.APPIUM_PORT }}/status" >/dev/null; then
+                echo "Appium is up"
+                break
+              fi
+              sleep 2
+            done
             export ANDROID_APP_PATH="${{ steps.apk.outputs.path }}"
             echo "ANDROID_APP_PATH=$ANDROID_APP_PATH"
+            adb wait-for-device
+            adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
             adb install -r "$ANDROID_APP_PATH"
-            dotnet test tests/UITests/UITests.Android/UITests.Android.csproj -c Release --logger "trx;LogFileName=android-smoke.trx"
+            timeout 10m dotnet test tests/UITests/UITests.Android/UITests.Android.csproj -c Release --logger "trx;LogFileName=android-smoke.trx"
 
       - name: Upload artifacts
         if: always()
