@@ -35,3 +35,12 @@ jobs:
 
       - name: Test
         run: dotnet test tests/Maui.SmartImage.Tests/Maui.SmartImage.Tests.csproj -c Release --no-build --verbosity normal
+
+      # Compile the sample for Windows only — catches XAML/API breakages without devices.
+      # Full multi-TFM restore of the sample still fails on CI (ios/maccatalyst RIDs).
+      # Sample restore with -r can rewrite the library assets file, so re-restore the library after.
+      - name: Build sample (Windows)
+        run: |
+          dotnet restore samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj -p:TargetFrameworks=net10.0-windows10.0.19041.0 -r win-x64
+          dotnet restore Maui.SmartImage/Maui.SmartImage.csproj
+          dotnet build samples/Maui.SmartImage.Sample/Maui.SmartImage.Sample.csproj -c Release -f net10.0-windows10.0.19041.0 -r win-x64 --no-restore

@@ -24,10 +24,10 @@ dotnet pack Maui.SmartImage/Maui.SmartImage.csproj -c Release -o artifacts
 ## Guidelines
 
 - Keep the public API intentional and documented (XML docs on public members).
-- Prefer unit tests for cache/loader behavior over UI tests.
+- Prefer unit tests for cache/loader/control behavior over UI tests.
 - Do not commit `bin/`, `obj/`, or local `artifacts/` packages.
 - Open a PR against `main` (or the active development branch); CI must pass.
 
 ## Sample app
 
-The sample under `samples/Maui.SmartImage.Sample` is the manual smoke path for visual behavior (shimmer, fade, retry).
+The sample under `samples/Maui.SmartImage.Sample` is the manual smoke path for visual behavior (shimmer, fade, retry). CI compiles the sample for Windows to catch XAML/API breakages.

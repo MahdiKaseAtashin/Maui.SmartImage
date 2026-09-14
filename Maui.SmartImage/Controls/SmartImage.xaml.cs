@@ -189,7 +189,7 @@ public partial class SmartImage : ContentView
     public static readonly BindableProperty ErrorProperty = ErrorPropertyKey.BindableProperty;
 
     private const string ShimmerAnimationName = "Shimmer";
-    private const string MissingRegistrationError =
+    internal const string MissingRegistrationError =
         "SmartImage requires builder.UseSmartImage() in MauiProgram.cs before remote sources can load.";
 
     private readonly LoadGenerationGuard _guard = new();
@@ -198,6 +198,12 @@ public partial class SmartImage : ContentView
     private SmartImageOptions? _options;
     private ILogger<SmartImage> _logger = NullLogger<SmartImage>.Instance;
     private bool _missingRegistrationReported;
+    private bool _attachedForTests;
+
+    /// <summary>
+    /// Whether the control is attached to a MAUI handler or to a unit-test host.
+    /// </summary>
+    private bool IsAttached => Handler is not null || _attachedForTests;
 
     /// <summary>
     /// Initializes a new <see cref="SmartImage"/>.
@@ -414,6 +420,31 @@ public partial class SmartImage : ContentView
     /// </summary>
     public bool IsFailed => State == SmartImageState.Failed;
 
+    /// <summary>
+    /// Injects dependencies for unit tests without a MAUI handler.
+    /// </summary>
+    internal void AttachForTests(IImageLoader? imageLoader, SmartImageOptions? options = null)
+    {
+        _attachedForTests = true;
+        _imageLoader = imageLoader;
+        _options = options ?? new SmartImageOptions();
+        _logger = NullLogger<SmartImage>.Instance;
+
+        if (_imageLoader is null)
+        {
+            ReportMissingRegistration();
+        }
+        else
+        {
+            OnSourceChanged(Source);
+        }
+    }
+
+    /// <summary>
+    /// Current <see cref="Image.Source"/> shown by the control (for unit tests).
+    /// </summary>
+    internal ImageSource? GetDisplayedSourceForTests() => PART_Image.Source;
+
     /// <inheritdoc />
     protected override void OnHandlerChanged()
     {
@@ -436,7 +467,7 @@ public partial class SmartImage : ContentView
             }
         }
 
-        if (Handler is null)
+        if (Handler is null && !_attachedForTests)
         {
             _loadCts?.Cancel();
             _loadCts?.Dispose();
@@ -454,7 +485,12 @@ public partial class SmartImage : ContentView
 
         _missingRegistrationReported = true;
         _logger.LogError(MissingRegistrationError);
-        Debug.Fail(MissingRegistrationError);
+
+        // Avoid Debug.Fail noise when exercising the missing-registration path from unit tests.
+        if (!_attachedForTests)
+        {
+            Debug.Fail(MissingRegistrationError);
+        }
 
         if (ImageSourceClassifier.Classify(Source) == ImageSourceKind.Remote)
         {
@@ -593,7 +629,7 @@ public partial class SmartImage : ContentView
         {
             _logger.LogError(ex, "SmartImage load failed for source {Source}.", source);
 
-            if (_guard.IsCurrent(generation) && Handler is not null)
+            if (_guard.IsCurrent(generation) && IsAttached)
             {
                 ApplyFailed(ex.Message);
             }
@@ -642,7 +678,7 @@ public partial class SmartImage : ContentView
 
         if (_imageLoader is null)
         {
-            if (Handler is not null)
+            if (IsAttached)
             {
                 ReportMissingRegistration();
             }
@@ -724,7 +760,7 @@ public partial class SmartImage : ContentView
 
     private async Task ApplyLoadedAsync(byte[] imageData, long generation)
     {
-        if (!_guard.IsCurrent(generation) || Handler is null)
+        if (!_guard.IsCurrent(generation) || !IsAttached)
         {
             return;
         }
@@ -737,7 +773,7 @@ public partial class SmartImage : ContentView
             {
                 await PART_Image.FadeToAsync(0, 100).ConfigureAwait(true);
 
-                if (!_guard.IsCurrent(generation) || Handler is null)
+                if (!_guard.IsCurrent(generation) || !IsAttached)
                 {
                     PART_Image.Opacity = 1;
                     return;
@@ -752,7 +788,7 @@ public partial class SmartImage : ContentView
             {
                 _logger.LogDebug(ex, "SmartImage fade animation interrupted.");
 
-                if (!_guard.IsCurrent(generation) || Handler is null)
+                if (!_guard.IsCurrent(generation) || !IsAttached)
                 {
                     PART_Image.Opacity = 1;
                     return;
