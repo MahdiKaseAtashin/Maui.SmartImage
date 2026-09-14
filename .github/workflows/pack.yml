@@ -11,6 +11,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      packages: write
 
     steps:
       - name: Checkout
@@ -76,3 +77,25 @@ jobs:
           }
 
           Write-Host "Push completed. Package may take a few minutes to appear on nuget.org."
+
+      - name: Push to GitHub Packages
+        shell: pwsh
+        run: |
+          $packages = @(Get-ChildItem artifacts -Filter *.nupkg)
+          if ($packages.Count -eq 0) {
+            throw "No .nupkg files found in artifacts/."
+          }
+
+          $source = "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+          foreach ($pkg in $packages) {
+            Write-Host "Pushing $($pkg.Name) to GitHub Packages..."
+            dotnet nuget push $pkg.FullName `
+              --api-key "${{ secrets.GITHUB_TOKEN }}" `
+              --source $source `
+              --skip-duplicate
+            if ($LASTEXITCODE -ne 0) {
+              throw "GitHub Packages push failed for $($pkg.Name) with exit code $LASTEXITCODE"
+            }
+          }
+
+          Write-Host "Published to GitHub Packages. It should appear under the repo Packages tab."

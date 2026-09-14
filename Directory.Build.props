@@ -3,7 +3,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <PackageVersion>1.0.4</PackageVersion>
+    <PackageVersion>1.0.5</PackageVersion>
     <Company>Mahdi Kase Atashin</Company>
     <Copyright>Copyright (c) 2026 Mahdi Kase Atashin</Copyright>
   </PropertyGroup>

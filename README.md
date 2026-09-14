@@ -115,6 +115,8 @@ await cache.ClearAsync(CancellationToken.None);
 
 ## Links
 
+- NuGet: [SmartImage.Maui](https://www.nuget.org/packages/SmartImage.Maui)
+- GitHub Packages: [MahdiKaseAtashin/SmartImage.Maui](https://github.com/MahdiKaseAtashin/Maui.SmartImage/pkgs/nuget/SmartImage.Maui)
 - Source: [github.com/MahdiKaseAtashin/Maui.SmartImage](https://github.com/MahdiKaseAtashin/Maui.SmartImage)
 - Changelog: [CHANGELOG.md](https://github.com/MahdiKaseAtashin/Maui.SmartImage/blob/main/CHANGELOG.md)
 - License: [MIT](https://github.com/MahdiKaseAtashin/Maui.SmartImage/blob/main/LICENSE)
