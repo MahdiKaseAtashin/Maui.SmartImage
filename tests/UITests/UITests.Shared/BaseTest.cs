@@ -23,10 +23,19 @@ public abstract class BaseTest
         };
         wait.IgnoreExceptionTypes(typeof(NoSuchElementException), typeof(StaleElementReferenceException));
 
-        wait.Until(_ =>
-            TryFind("Smoke.Title")
-            ?? TryFind("Smoke.Page")
-            ?? TryFindByName("UI Smoke"));
+        try
+        {
+            wait.Until(_ =>
+                TryFind("Smoke.Title")
+                ?? TryFind("Smoke.Page")
+                ?? TryFindByName("UI Smoke"));
+        }
+        catch (WebDriverTimeoutException ex)
+        {
+            throw new WebDriverTimeoutException(
+                $"{ex.Message}{Environment.NewLine}PageSource:{Environment.NewLine}{TruncatePageSource()}",
+                ex);
+        }
     }
 
     protected AppiumElement WaitForId(string automationId, TimeSpan? timeout = null)
@@ -37,7 +46,16 @@ public abstract class BaseTest
         };
         wait.IgnoreExceptionTypes(typeof(NoSuchElementException), typeof(StaleElementReferenceException));
 
-        return wait.Until(_ => TryFind(automationId))!;
+        try
+        {
+            return wait.Until(_ => TryFind(automationId))!;
+        }
+        catch (WebDriverTimeoutException ex)
+        {
+            throw new WebDriverTimeoutException(
+                $"Timed out waiting for '{automationId}'.{Environment.NewLine}PageSource:{Environment.NewLine}{TruncatePageSource()}",
+                ex);
+        }
     }
 
     protected void WaitForState(string automationId, string expectedState, TimeSpan? timeout = null)
@@ -96,7 +114,6 @@ public abstract class BaseTest
             }
             catch (WebDriverException)
             {
-                // Try next attribute.
             }
         }
 
@@ -105,20 +122,8 @@ public abstract class BaseTest
 
     protected AppiumElement? FindDisplayedById(string automationId)
     {
-        AppiumElement? element = TryFind(automationId);
-        if (element is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return element.Displayed ? element : null;
-        }
-        catch (StaleElementReferenceException)
-        {
-            return null;
-        }
+        AppiumElement? element = TryFind(automationId, requireDisplayed: true);
+        return element;
     }
 
     protected AppiumElement WaitForDisplayedById(string automationId, TimeSpan? timeout = null)
@@ -128,24 +133,39 @@ public abstract class BaseTest
             PollingInterval = TimeSpan.FromMilliseconds(400)
         };
 
-        return wait.Until(_ => FindDisplayedById(automationId))!;
+        try
+        {
+            return wait.Until(_ => FindDisplayedById(automationId))!;
+        }
+        catch (WebDriverTimeoutException ex)
+        {
+            throw new WebDriverTimeoutException(
+                $"Timed out waiting for displayed '{automationId}'.{Environment.NewLine}PageSource:{Environment.NewLine}{TruncatePageSource()}",
+                ex);
+        }
     }
 
-    protected AppiumElement? TryFind(string automationId)
+    protected AppiumElement? TryFind(string automationId, bool requireDisplayed = false)
     {
         foreach (By by in LocatorStrategies(automationId))
         {
             try
             {
                 AppiumElement element = (AppiumElement)App.FindElement(by);
-                if (element.Displayed)
+                if (requireDisplayed)
                 {
-                    return element;
+                    if (element.Displayed)
+                    {
+                        return element;
+                    }
+
+                    continue;
                 }
+
+                return element;
             }
             catch (WebDriverException)
             {
-                // Try next strategy.
             }
         }
 
@@ -157,7 +177,7 @@ public abstract class BaseTest
         try
         {
             AppiumElement element = (AppiumElement)App.FindElement(By.Name(name));
-            return element.Displayed ? element : null;
+            return element;
         }
         catch (WebDriverException)
         {
@@ -165,10 +185,46 @@ public abstract class BaseTest
         }
     }
 
+    private string TruncatePageSource(int maxChars = 8000)
+    {
+        try
+        {
+            string source = App.PageSource ?? string.Empty;
+            if (source.Length <= maxChars)
+            {
+                return source;
+            }
+
+            return source[..maxChars] + $"{Environment.NewLine}... truncated ({source.Length} chars total)";
+        }
+        catch (Exception ex)
+        {
+            return $"(failed to read PageSource: {ex.Message})";
+        }
+    }
+
     private static IEnumerable<By> LocatorStrategies(string automationId)
     {
-        // Mac2 maps id / accessibility id / name to AXIdentifier; CSS-style By.Id is invalid there.
         yield return MobileBy.AccessibilityId(automationId);
         yield return MobileBy.Id(automationId);
+        yield return By.Name(automationId);
+
+        string escaped = EscapeForXPath(automationId);
+        yield return By.XPath($"//*[@content-desc={escaped} or @contentDescription={escaped} or @name={escaped} or @label={escaped} or @value={escaped} or @text={escaped} or text()={escaped}]");
+    }
+
+    private static string EscapeForXPath(string value)
+    {
+        if (!value.Contains('\''))
+        {
+            return $"'{value}'";
+        }
+
+        if (!value.Contains('"'))
+        {
+            return $"\"{value}\"";
+        }
+
+        return "concat('" + value.Replace("'", "',\"'\",'") + "')";
     }
 }

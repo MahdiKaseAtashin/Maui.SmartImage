@@ -12,7 +12,7 @@ public class SmokeTests : BaseTest
         WaitForSmokeReady();
         WaitForId("Smoke.LocalImage.Loaded", TimeSpan.FromSeconds(60));
 
-        AppiumElement? retry = FindDisplayedById("SmartImage.RetryOverlay");
+        AppiumElement? retry = FindDisplayedById("Smoke.LocalImage.RetryOverlay");
         Assert.That(retry, Is.Null, "Local image should not show the retry overlay.");
     }
 
@@ -22,7 +22,7 @@ public class SmokeTests : BaseTest
         WaitForSmokeReady();
         WaitForId("Smoke.FailedRemote.Failed", TimeSpan.FromSeconds(60));
 
-        AppiumElement retry = WaitForDisplayedById("SmartImage.RetryOverlay");
+        AppiumElement retry = WaitForDisplayedById("Smoke.FailedRemote.RetryOverlay");
         Assert.That(retry.Displayed, Is.True);
     }
 
@@ -32,12 +32,11 @@ public class SmokeTests : BaseTest
         WaitForSmokeReady();
         WaitForId("Smoke.FailedRemote.Failed", TimeSpan.FromSeconds(60));
 
-        AppiumElement retry = WaitForDisplayedById("SmartImage.RetryOverlay");
+        AppiumElement retry = WaitForDisplayedById("Smoke.FailedRemote.RetryOverlay");
         retry.Click();
 
-        // After retry with MaxRetryCount=0 / no auto-retry, failure should return.
         WaitForId("Smoke.FailedRemote.Failed", TimeSpan.FromSeconds(60));
-        Assert.That(WaitForDisplayedById("SmartImage.RetryOverlay").Displayed, Is.True);
+        Assert.That(WaitForDisplayedById("Smoke.FailedRemote.RetryOverlay").Displayed, Is.True);
         Assert.That(TryFind("Smoke.Title") ?? TryFind("Smoke.Page"), Is.Not.Null);
     }
 }
