@@ -29,6 +29,12 @@ dotnet pack Maui.SmartImage/Maui.SmartImage.csproj -c Release -o artifacts
 
 CI runs UI-state smoke on every PR via [`.github/workflows/smoke-ui.yml`](.github/workflows/smoke-ui.yml) for **Windows**, **Android**, **iOS**, and **MacCatalyst**. Tests assert `Loaded` / `Failed` / retry on `SmokePage` only (not shimmer/fade).
 
+### Locators
+
+- The consumer `AutomationId` on `SmartImage` stays stable (e.g. `Smoke.LocalImage`).
+- Load state is exposed on an always-in-tree probe as `{AutomationId}.{State}` (e.g. `Smoke.LocalImage.Loaded`, `Smoke.FailedRemote.Failed`).
+- Retry / skeleton overlays use prefixed ids (`Smoke.FailedRemote.RetryOverlay`, `Smoke.LocalImage.SkeletonOverlay`) so multiple controls do not share one AutomationId.
+
 ### Prerequisites
 
 - Node.js 20+
