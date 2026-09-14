@@ -21,12 +21,12 @@ public class AppiumSetup
         AppiumOptions options = new();
         options.PlatformName = "Windows";
         options.AutomationName = "Windows";
-        // WinAppDriver expects the legacy "app" capability (not only appium:app via options.App).
-        options.AddAdditionalAppiumOption("app", appPath);
+        // Appium.WebDriver 5 owns appium:app via App — do not also AddAdditionalAppiumOption("app").
+        options.App = appPath;
         options.AddAdditionalAppiumOption("appArguments", "--smoke");
         options.AddAdditionalAppiumOption("newCommandTimeout", 300);
         options.AddAdditionalAppiumOption("ms:waitForAppLaunch", "25");
-        // WinAppDriver is started on 4724 in CI so it does not collide with Appium on 4723.
+
         string? wadUrl = Environment.GetEnvironmentVariable("WINAPPDRIVER_URL");
         if (!string.IsNullOrWhiteSpace(wadUrl))
         {

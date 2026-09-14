@@ -27,8 +27,8 @@
 		       <MauiXaml Update="MyPage.xaml" Inflator="Runtime" /> (force runtime inflation) -->
 		<MauiXamlInflator>SourceGen</MauiXamlInflator>
 
-		<!-- Display name -->
-		<ApplicationTitle>SmartImage.Maui Sample</ApplicationTitle>
+		<!-- Display name / bundle folder (avoid spaces for Appium Mac2 path handling) -->
+		<ApplicationTitle>Maui.SmartImage.Sample</ApplicationTitle>
 
 		<!-- App Identifier -->
 		<ApplicationId>com.mahdi.smartimage.maui.sample</ApplicationId>

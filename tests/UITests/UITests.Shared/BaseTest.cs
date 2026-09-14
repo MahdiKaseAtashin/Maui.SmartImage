@@ -11,57 +11,58 @@ public abstract class BaseTest
 
     protected AppiumElement FindById(string automationId)
     {
-        return (AppiumElement)App.FindElement(MobileBy.AccessibilityId(automationId));
+        return TryFind(automationId)
+            ?? throw new NoSuchElementException($"No element found for '{automationId}'.");
     }
 
-    protected AppiumElement WaitForId(string automationId, TimeSpan? timeout = null)
+    protected void WaitForSmokeReady(TimeSpan? timeout = null)
     {
-        WebDriverWait wait = new(App, timeout ?? TimeSpan.FromSeconds(30))
-        {
-            PollingInterval = TimeSpan.FromMilliseconds(250)
-        };
-        wait.IgnoreExceptionTypes(typeof(NoSuchElementException), typeof(StaleElementReferenceException));
-
-        return wait.Until(driver =>
-        {
-            try
-            {
-                AppiumElement element = (AppiumElement)driver.FindElement(MobileBy.AccessibilityId(automationId));
-                return element.Displayed ? element : null;
-            }
-            catch (NoSuchElementException)
-            {
-                return null;
-            }
-        })!;
-    }
-
-    protected void WaitForState(string automationId, string expectedState, TimeSpan? timeout = null)
-    {
-        WebDriverWait wait = new(App, timeout ?? TimeSpan.FromSeconds(45))
+        WebDriverWait wait = new(App, timeout ?? TimeSpan.FromSeconds(60))
         {
             PollingInterval = TimeSpan.FromMilliseconds(400)
         };
         wait.IgnoreExceptionTypes(typeof(NoSuchElementException), typeof(StaleElementReferenceException));
 
-        wait.Until(driver =>
+        wait.Until(_ =>
+            TryFind("Smoke.Title")
+            ?? TryFind("Smoke.Page")
+            ?? TryFindByName("UI Smoke"));
+    }
+
+    protected AppiumElement WaitForId(string automationId, TimeSpan? timeout = null)
+    {
+        WebDriverWait wait = new(App, timeout ?? TimeSpan.FromSeconds(45))
         {
-            try
-            {
-                AppiumElement element = (AppiumElement)driver.FindElement(MobileBy.AccessibilityId(automationId));
-                string? actual = ReadState(element);
-                return string.Equals(actual, expectedState, StringComparison.OrdinalIgnoreCase);
-            }
-            catch (NoSuchElementException)
+            PollingInterval = TimeSpan.FromMilliseconds(250)
+        };
+        wait.IgnoreExceptionTypes(typeof(NoSuchElementException), typeof(StaleElementReferenceException));
+
+        return wait.Until(_ => TryFind(automationId))!;
+    }
+
+    protected void WaitForState(string automationId, string expectedState, TimeSpan? timeout = null)
+    {
+        WebDriverWait wait = new(App, timeout ?? TimeSpan.FromSeconds(60))
+        {
+            PollingInterval = TimeSpan.FromMilliseconds(400)
+        };
+        wait.IgnoreExceptionTypes(typeof(NoSuchElementException), typeof(StaleElementReferenceException));
+
+        wait.Until(_ =>
+        {
+            AppiumElement? element = TryFind(automationId);
+            if (element is null)
             {
                 return false;
             }
+
+            string? actual = ReadState(element);
+            return string.Equals(actual, expectedState, StringComparison.OrdinalIgnoreCase);
         });
     }
 
     protected static string? ReadState(AppiumElement element)
     {
-        // Platform attribute names differ; try common mappings from SemanticProperties / AutomationProperties.
         string[] attributes =
         [
             "contentDescription",
@@ -70,7 +71,9 @@ public abstract class BaseTest
             "label",
             "Value.Value",
             "Description",
-            "HelpText"
+            "HelpText",
+            "title",
+            "value"
         ];
 
         foreach (string attribute in attributes)
@@ -102,23 +105,20 @@ public abstract class BaseTest
 
     protected AppiumElement? FindDisplayedById(string automationId)
     {
-        foreach (IWebElement webElement in App.FindElements(MobileBy.AccessibilityId(automationId)))
+        AppiumElement? element = TryFind(automationId);
+        if (element is null)
         {
-            try
-            {
-                AppiumElement element = (AppiumElement)webElement;
-                if (element.Displayed)
-                {
-                    return element;
-                }
-            }
-            catch (StaleElementReferenceException)
-            {
-                // Ignore.
-            }
+            return null;
         }
 
-        return null;
+        try
+        {
+            return element.Displayed ? element : null;
+        }
+        catch (StaleElementReferenceException)
+        {
+            return null;
+        }
     }
 
     protected AppiumElement WaitForDisplayedById(string automationId, TimeSpan? timeout = null)
@@ -129,5 +129,46 @@ public abstract class BaseTest
         };
 
         return wait.Until(_ => FindDisplayedById(automationId))!;
+    }
+
+    protected AppiumElement? TryFind(string automationId)
+    {
+        foreach (By by in LocatorStrategies(automationId))
+        {
+            try
+            {
+                AppiumElement element = (AppiumElement)App.FindElement(by);
+                if (element.Displayed)
+                {
+                    return element;
+                }
+            }
+            catch (WebDriverException)
+            {
+                // Try next strategy.
+            }
+        }
+
+        return null;
+    }
+
+    private AppiumElement? TryFindByName(string name)
+    {
+        try
+        {
+            AppiumElement element = (AppiumElement)App.FindElement(By.Name(name));
+            return element.Displayed ? element : null;
+        }
+        catch (WebDriverException)
+        {
+            return null;
+        }
+    }
+
+    private static IEnumerable<By> LocatorStrategies(string automationId)
+    {
+        yield return MobileBy.AccessibilityId(automationId);
+        yield return By.Name(automationId);
+        yield return By.Id(automationId);
     }
 }

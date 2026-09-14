@@ -9,7 +9,7 @@ public class SmokeTests : BaseTest
     [Test]
     public void LocalImage_ReachesLoadedState()
     {
-        WaitForId("Smoke.Page");
+        WaitForSmokeReady();
         WaitForState("Smoke.LocalImage", "Loaded");
 
         AppiumElement? retry = FindDisplayedById("SmartImage.RetryOverlay");
@@ -19,7 +19,7 @@ public class SmokeTests : BaseTest
     [Test]
     public void FailedRemote_ReachesFailedState_AndShowsRetry()
     {
-        WaitForId("Smoke.Page");
+        WaitForSmokeReady();
         WaitForState("Smoke.FailedRemote", "Failed");
 
         AppiumElement retry = WaitForDisplayedById("SmartImage.RetryOverlay");
@@ -29,7 +29,7 @@ public class SmokeTests : BaseTest
     [Test]
     public void FailedRemote_RetryTap_DoesNotCrash()
     {
-        WaitForId("Smoke.Page");
+        WaitForSmokeReady();
         WaitForState("Smoke.FailedRemote", "Failed");
 
         AppiumElement retry = WaitForDisplayedById("SmartImage.RetryOverlay");
@@ -38,6 +38,6 @@ public class SmokeTests : BaseTest
         // After retry with MaxRetryCount=0 / no auto-retry, failure should return (or briefly Loading then Failed).
         WaitForState("Smoke.FailedRemote", "Failed", TimeSpan.FromSeconds(60));
         Assert.That(WaitForDisplayedById("SmartImage.RetryOverlay").Displayed, Is.True);
-        Assert.That(FindById("Smoke.Page").Displayed, Is.True);
+        Assert.That(TryFind("Smoke.Title") ?? TryFind("Smoke.Page"), Is.Not.Null);
     }
 }
