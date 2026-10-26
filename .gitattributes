@@ -6,3 +6,7 @@
 *.ico binary
 *.snupkg binary
 *.nupkg binary
+
+# Actions workflows stay LF so a version bump does not rewrite every line.
+.github/workflows/*.yml text eol=lf
+.github/workflows/*.yaml text eol=lf
