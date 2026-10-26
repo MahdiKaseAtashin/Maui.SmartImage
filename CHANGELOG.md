@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `SmartImageOptions.MaxConcurrentDownloads` (default 4) so a CollectionView fling cannot open unbounded HTTP work
+- `IImageCache.TrimMemory` to compact the in-memory tier; energy saver turns this on automatically
+- Display-time downsampling so CollectionView cells decode toward view/screen size instead of the full photo
+- Cancellation of unused in-flight downloads when the last waiter (a recycled cell) lets go
+
+### Fixed
+
+- Recycled cells no longer keep a fade at opacity 0 or a decoded bitmap after handler disconnect
+- Disk cache eviction uses a running size index instead of listing the cache directory after every write
+- Power-saving mode skips automatic retries, fade-in, and shimmer so the radio and UI thread can idle
+- `IImageLoader` is now a singleton so CollectionView cells share deduplication and the download cap
+- Singleton loader creates an `HttpClient` per download via `IHttpClientFactory` so factory handlers can rotate
+- Display downsample runs off the UI thread and retries when a CollectionView cell gets a real size
+- `IImageCache.TrimMemory` has a default interface implementation so external implementers are not broken
+- A cancelled waiter still receives an already-completed download; the in-flight join loop is bounded
+
 ## [1.0.5] - 2026-09-14
 
 ### Added

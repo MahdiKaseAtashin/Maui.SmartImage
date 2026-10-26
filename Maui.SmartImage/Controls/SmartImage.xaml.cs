@@ -196,9 +196,15 @@ public partial class SmartImage : ContentView
     private CancellationTokenSource? _loadCts;
     private IImageLoader? _imageLoader;
     private SmartImageOptions? _options;
+    private IDeviceResourceMonitor? _deviceResources;
     private ILogger<SmartImage> _logger = NullLogger<SmartImage>.Instance;
     private bool _missingRegistrationReported;
     private bool _attachedForTests;
+    private bool _subscribedToDeviceResources;
+    private bool _subscribedToSizeChanged;
+    private byte[]? _rawLoadedBytes;
+    private bool _downsampledToViewSize;
+    private long _loadedGeneration;
 
     /// <summary>
     /// Whether the control is attached to a MAUI handler or to a unit-test host.
@@ -424,12 +430,18 @@ public partial class SmartImage : ContentView
     /// <summary>
     /// Injects dependencies for unit tests without a MAUI handler.
     /// </summary>
-    internal void AttachForTests(IImageLoader? imageLoader, SmartImageOptions? options = null)
+    internal void AttachForTests(
+        IImageLoader? imageLoader,
+        SmartImageOptions? options = null,
+        IDeviceResourceMonitor? deviceResources = null)
     {
         _attachedForTests = true;
         _imageLoader = imageLoader;
         _options = options ?? new SmartImageOptions();
+        _deviceResources = deviceResources;
         _logger = NullLogger<SmartImage>.Instance;
+        SubscribeToDeviceResources();
+        SubscribeToSizeChanged();
 
         if (_imageLoader is null)
         {
@@ -442,9 +454,47 @@ public partial class SmartImage : ContentView
     }
 
     /// <summary>
+    /// Simulates handler disconnect for unit tests.
+    /// </summary>
+    internal void DetachForTests()
+    {
+        _attachedForTests = false;
+        CancelCurrentLoad();
+        ResetVisualPresentation(releaseImage: true);
+        UnsubscribeFromDeviceResources();
+        UnsubscribeFromSizeChanged();
+        ClearRawLoadedBytes();
+        _imageLoader = null;
+        _deviceResources = null;
+    }
+
+    /// <summary>
+    /// Current inner-image opacity shown by the control (for unit tests).
+    /// </summary>
+    internal double GetDisplayedOpacityForTests() => PART_Image.Opacity;
+
+    /// <summary>
+    /// Sets the inner image opacity for unit tests.
+    /// </summary>
+    internal void SetDisplayedOpacityForTests(double value) => PART_Image.Opacity = value;
+
+    /// <summary>
     /// Current <see cref="Image.Source"/> shown by the control (for unit tests).
     /// </summary>
     internal ImageSource? GetDisplayedSourceForTests() => PART_Image.Source;
+
+    /// <summary>
+    /// Whether raw remote bytes are kept for a later view-sized downsample (for unit tests).
+    /// </summary>
+    internal bool HasPendingRawBytesForTests => _rawLoadedBytes is not null;
+
+    /// <summary>
+    /// Runs the SizeChanged downsample path with an explicit cell size (for unit tests).
+    /// </summary>
+    internal Task TryRedownsampleForTestsAsync(double width, double height)
+    {
+        return TryRedownsampleToViewAsync(width, height);
+    }
 
     /// <inheritdoc />
     protected override void OnHandlerChanged()
@@ -456,7 +506,10 @@ public partial class SmartImage : ContentView
             IServiceProvider? services = Handler.MauiContext?.Services;
             _imageLoader ??= services?.GetService<IImageLoader>();
             _options ??= services?.GetService<SmartImageOptions>();
+            _deviceResources ??= services?.GetService<IDeviceResourceMonitor>();
             _logger = services?.GetService<ILogger<SmartImage>>() ?? NullLogger<SmartImage>.Instance;
+            SubscribeToDeviceResources();
+            SubscribeToSizeChanged();
 
             if (_imageLoader is null)
             {
@@ -470,10 +523,11 @@ public partial class SmartImage : ContentView
 
         if (Handler is null && !_attachedForTests)
         {
-            _loadCts?.Cancel();
-            _loadCts?.Dispose();
-            _loadCts = null;
-            StopShimmer();
+            CancelCurrentLoad();
+            ResetVisualPresentation(releaseImage: true);
+            UnsubscribeFromDeviceResources();
+            UnsubscribeFromSizeChanged();
+            ClearRawLoadedBytes();
         }
     }
 
@@ -567,6 +621,13 @@ public partial class SmartImage : ContentView
     private void StartShimmer()
     {
         PART_ShimmerHighlight.AbortAnimation(ShimmerAnimationName);
+
+        if (ShouldReduceMotion)
+        {
+            PART_ShimmerHighlight.TranslationX = -80;
+            return;
+        }
+
         RunShimmerCycle();
     }
 
@@ -605,12 +666,172 @@ public partial class SmartImage : ContentView
     private void OnSourceChanged(string? source)
     {
         long generation = _guard.Begin();
-
-        _loadCts?.Cancel();
-        _loadCts?.Dispose();
+        CancelCurrentLoad();
+        ResetVisualPresentation(releaseImage: false);
         _loadCts = new CancellationTokenSource();
 
         _ = SafeLoadAsync(source, generation, _loadCts.Token);
+    }
+
+    private void CancelCurrentLoad()
+    {
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+
+    private void ResetVisualPresentation(bool releaseImage)
+    {
+        try
+        {
+            PART_Image.CancelAnimations();
+        }
+        catch (Exception)
+        {
+            // Animations may not be initialized in headless tests.
+        }
+
+        PART_Image.Opacity = 1;
+        StopShimmer();
+
+        if (releaseImage)
+        {
+            PART_Image.Source = null;
+        }
+    }
+
+    private bool ShouldReduceMotion => _deviceResources?.IsConstrained == true;
+
+    private void SubscribeToDeviceResources()
+    {
+        if (_subscribedToDeviceResources || _deviceResources is null)
+        {
+            return;
+        }
+
+        _deviceResources.ConstraintsChanged += OnDeviceConstraintsChanged;
+        _subscribedToDeviceResources = true;
+    }
+
+    private void UnsubscribeFromDeviceResources()
+    {
+        if (!_subscribedToDeviceResources || _deviceResources is null)
+        {
+            return;
+        }
+
+        _deviceResources.ConstraintsChanged -= OnDeviceConstraintsChanged;
+        _subscribedToDeviceResources = false;
+    }
+
+    private void SubscribeToSizeChanged()
+    {
+        if (_subscribedToSizeChanged)
+        {
+            return;
+        }
+
+        SizeChanged += OnViewSizeChanged;
+        _subscribedToSizeChanged = true;
+    }
+
+    private void UnsubscribeFromSizeChanged()
+    {
+        if (!_subscribedToSizeChanged)
+        {
+            return;
+        }
+
+        SizeChanged -= OnViewSizeChanged;
+        _subscribedToSizeChanged = false;
+    }
+
+    private void OnViewSizeChanged(object? sender, EventArgs e)
+    {
+        if (Width <= 0 || Height <= 0)
+        {
+            return;
+        }
+
+        _ = TryRedownsampleToViewAsync(Width, Height);
+    }
+
+    private async Task TryRedownsampleToViewAsync(double viewWidth, double viewHeight)
+    {
+        byte[]? raw = _rawLoadedBytes;
+        if (raw is null || State != SmartImageState.Loaded || _downsampledToViewSize
+            || !ImageDownsampler.UsesViewSize(viewWidth, viewHeight))
+        {
+            return;
+        }
+
+        long generation = _loadedGeneration;
+        byte[] displayBytes;
+
+        try
+        {
+            displayBytes = await Task.Run(() => ImageDownsampler.MaybeDownsample(raw, viewWidth, viewHeight))
+                .ConfigureAwait(true);
+        }
+        catch (OutOfMemoryException)
+        {
+            return;
+        }
+
+        if (!_guard.IsCurrent(generation) || !IsAttached || State != SmartImageState.Loaded)
+        {
+            return;
+        }
+
+        PART_Image.Source = CreateStreamSource(displayBytes);
+        _downsampledToViewSize = true;
+        ClearRawLoadedBytes();
+    }
+
+    private void ClearRawLoadedBytes()
+    {
+        _rawLoadedBytes = null;
+        _downsampledToViewSize = false;
+    }
+
+    private static ImageSource CreateStreamSource(byte[] displayBytes)
+    {
+        return ImageSource.FromStream(_ => Task.FromResult<Stream>(new MemoryStream(displayBytes)));
+    }
+
+    private void OnDeviceConstraintsChanged(object? sender, EventArgs e)
+    {
+        void Apply()
+        {
+            if (ShouldReduceMotion)
+            {
+                StopShimmer();
+
+                try
+                {
+                    PART_Image.CancelAnimations();
+                }
+                catch (Exception)
+                {
+                    // Animations may not be initialized in headless tests.
+                }
+
+                PART_Image.Opacity = 1;
+            }
+            else if (State == SmartImageState.Loading)
+            {
+                StartShimmer();
+            }
+        }
+
+        if (Dispatcher.IsDispatchRequired)
+        {
+            Dispatcher.Dispatch(Apply);
+        }
+        else
+        {
+            Apply();
+        }
     }
 
     private async Task SafeRetryAsync()
@@ -654,9 +875,8 @@ public partial class SmartImage : ContentView
         }
 
         long generation = _guard.Begin();
-
-        _loadCts?.Cancel();
-        _loadCts?.Dispose();
+        CancelCurrentLoad();
+        ResetVisualPresentation(releaseImage: false);
         _loadCts = new CancellationTokenSource();
 
         await LoadAsync(Source, generation, _loadCts.Token).ConfigureAwait(true);
@@ -727,6 +947,15 @@ public partial class SmartImage : ContentView
         {
             return;
         }
+        catch (OutOfMemoryException)
+        {
+            if (_guard.IsCurrent(generation) && IsAttached)
+            {
+                ApplyFailed("The process is out of memory.");
+            }
+
+            return;
+        }
 
         if (!_guard.IsCurrent(generation))
         {
@@ -747,6 +976,7 @@ public partial class SmartImage : ContentView
     {
         State = SmartImageState.Idle;
         Error = null;
+        ClearRawLoadedBytes();
         PART_Image.Source = Placeholder;
     }
 
@@ -754,6 +984,7 @@ public partial class SmartImage : ContentView
     {
         State = SmartImageState.Loaded;
         Error = null;
+        ClearRawLoadedBytes();
         PART_Image.Source = source;
     }
 
@@ -775,12 +1006,50 @@ public partial class SmartImage : ContentView
             return;
         }
 
-        ImageSource loadedSource = ImageSource.FromStream(_ => Task.FromResult<Stream>(new MemoryStream(imageData)));
+        byte[] displayBytes;
+        ImageSource loadedSource;
 
-        if (EnableFadeAnimation)
+        try
+        {
+            double viewWidth = Width;
+            double viewHeight = Height;
+            displayBytes = await Task.Run(() => ImageDownsampler.MaybeDownsample(imageData, viewWidth, viewHeight))
+                .ConfigureAwait(true);
+
+            if (!_guard.IsCurrent(generation) || !IsAttached)
+            {
+                return;
+            }
+
+            loadedSource = CreateStreamSource(displayBytes);
+            _loadedGeneration = generation;
+            _rawLoadedBytes = imageData;
+            _downsampledToViewSize = ImageDownsampler.UsesViewSize(viewWidth, viewHeight);
+
+            if (_downsampledToViewSize)
+            {
+                _rawLoadedBytes = null;
+            }
+        }
+        catch (OutOfMemoryException)
+        {
+            ApplyFailed("The process is out of memory.");
+            return;
+        }
+
+        if (EnableFadeAnimation && !ShouldReduceMotion)
         {
             try
             {
+                try
+                {
+                    PART_Image.CancelAnimations();
+                }
+                catch (Exception)
+                {
+                    // Animations may not be initialized in headless tests.
+                }
+
                 await PART_Image.FadeToAsync(0, 100).ConfigureAwait(true);
 
                 if (!_guard.IsCurrent(generation) || !IsAttached)
@@ -823,6 +1092,7 @@ public partial class SmartImage : ContentView
     {
         State = SmartImageState.Failed;
         Error = errorMessage;
+        ClearRawLoadedBytes();
         PART_Image.Source = ErrorImage ?? Placeholder;
     }
 }

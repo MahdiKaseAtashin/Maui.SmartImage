@@ -162,6 +162,73 @@ public class SmartImageTests
         await WaitForStateAsync(image, SmartImageState.Loaded);
     }
 
+    [Fact]
+    public async Task ChangingSource_ResetsDisplayedOpacity()
+    {
+        TaskCompletionSource<ImageLoadResult> remoteLoad = new();
+        IImageLoader loader = Substitute.For<IImageLoader>();
+        loader.LoadAsync(Arg.Any<ImageLoadRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => remoteLoad.Task);
+
+        SmartImageControl image = CreateControl(loader);
+        image.SetDisplayedOpacityForTests(0);
+        image.Source = RemoteUrl;
+
+        await WaitForStateAsync(image, SmartImageState.Loading);
+        image.GetDisplayedOpacityForTests().Should().Be(1);
+
+        remoteLoad.SetResult(ImageLoadResult.Success(ValidPngBytes));
+        await WaitForStateAsync(image, SmartImageState.Loaded);
+    }
+
+    [Fact]
+    public async Task Detach_ClearsDisplayedSource()
+    {
+        IImageLoader loader = Substitute.For<IImageLoader>();
+        SmartImageControl image = CreateControl(loader);
+        image.Source = "dotnet_bot.png";
+        await WaitForStateAsync(image, SmartImageState.Loaded);
+
+        image.DetachForTests();
+
+        image.GetDisplayedSourceForTests().Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ConstrainedDevice_SkipsFadeAndKeepsOpaque()
+    {
+        IImageLoader loader = Substitute.For<IImageLoader>();
+        loader.LoadAsync(Arg.Any<ImageLoadRequest>(), Arg.Any<CancellationToken>())
+            .Returns(ImageLoadResult.Success(ValidPngBytes));
+
+        FakeDeviceResourceMonitor monitor = new() { IsConstrained = true };
+        SmartImageControl image = new() { EnableFadeAnimation = true };
+        image.AttachForTests(loader, deviceResources: monitor);
+        image.Source = RemoteUrl;
+
+        await WaitForStateAsync(image, SmartImageState.Loaded);
+        image.GetDisplayedOpacityForTests().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RemoteLoad_WithoutViewSize_KeepsRawBytesUntilRedownsample()
+    {
+        IImageLoader loader = Substitute.For<IImageLoader>();
+        loader.LoadAsync(Arg.Any<ImageLoadRequest>(), Arg.Any<CancellationToken>())
+            .Returns(ImageLoadResult.Success(ValidPngBytes));
+
+        SmartImageControl image = CreateControl(loader);
+        image.Source = RemoteUrl;
+        await WaitForStateAsync(image, SmartImageState.Loaded);
+
+        image.HasPendingRawBytesForTests.Should().BeTrue();
+
+        await image.TryRedownsampleForTestsAsync(120, 80);
+
+        image.HasPendingRawBytesForTests.Should().BeFalse();
+        image.GetDisplayedSourceForTests().Should().NotBeNull();
+    }
+
     private static SmartImageControl CreateControl(IImageLoader loader)
     {
         SmartImageControl image = new()

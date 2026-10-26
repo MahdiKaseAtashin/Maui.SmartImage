@@ -24,7 +24,9 @@ A cache-aware, retryable image control for **.NET MAUI 10**.
 - Automatic **local vs remote** source detection
 - **Memory + disk** caching with size budgets and TTL
 - **Request deduplication** (concurrent loads of the same URL share one download)
+- **Bounded downloads** (default 4 at a time) and cancel-when-unused for recycled CollectionView cells
 - **Retry** with exponential backoff + jitter (408 / 429 / 5xx, timeouts, network errors)
+- Low-memory / energy-saver: compact the memory cache, skip retries/fade/shimmer, downsample to view size
 - Skeleton shimmer, fade-in, placeholder / error images, retry overlay
 - Configurable via `UseSmartImage(options => …)`
 
@@ -61,6 +63,8 @@ builder
     KeepPreviousImageWhileLoading="True" />
 ```
 
+`KeepPreviousImageWhileLoading` is for a single control that changes `Source`. Leave it off in a `CollectionView`.
+
 ## How it works
 
 1. Classify `Source` → empty / local / remote  
@@ -95,18 +99,24 @@ builder.UseSmartImage(options =>
     options.DefaultMaxImageSizeBytes = 10 * 1024 * 1024;
     options.MemoryCacheSizeLimitBytes = 32 * 1024 * 1024;
     options.MaxDiskCacheSizeBytes = 128 * 1024 * 1024;
+    options.MaxConcurrentDownloads = 4;
     options.DiskCacheDirectory = Path.Combine(FileSystem.CacheDirectory, "my_app_image_cache");
     options.ConfigureHttpClient = client =>
         client.DefaultRequestHeaders.Add("User-Agent", "MyApp/1.0");
 });
 ```
 
-Clear cache at runtime:
+Clear cache at runtime, or compact only the memory tier under pressure:
 
 ```csharp
 var cache = services.GetRequiredService<IImageCache>();
 await cache.ClearAsync(CancellationToken.None);
+cache.TrimMemory(); // disk entries stay; host apps can also call this from a platform memory warning
 ```
+
+### CollectionView
+
+Keep `KeepPreviousImageWhileLoading` at its default (`false`) in a list. A recycled cell would otherwise keep the previous item's bitmap. `SmartImage` already cancels the previous wait when `Source` changes; if that cell was the last waiter for a URL, the download itself is cancelled too.
 
 ## Requirements
 

@@ -21,6 +21,9 @@ public sealed class ImageCache : IImageCache, IDisposable
     private readonly long _maxDiskCacheSizeBytes;
     private readonly bool _ownsMemoryCache;
     private readonly object _diskEvictionLock = new();
+    private readonly Dictionary<string, DiskIndexEntry> _diskIndex = new(StringComparer.Ordinal);
+    private long _trackedDiskSize;
+    private bool _diskIndexInitialized;
 
     /// <summary>
     /// Creates a new image cache.
@@ -120,10 +123,7 @@ public sealed class ImageCache : IImageCache, IDisposable
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_memoryCache is MemoryCache concreteMemoryCache)
-        {
-            concreteMemoryCache.Compact(1.0);
-        }
+        TrimMemory(1.0);
 
         try
         {
@@ -145,7 +145,23 @@ public sealed class ImageCache : IImageCache, IDisposable
             // Best-effort clear.
         }
 
+        lock (_diskEvictionLock)
+        {
+            _diskIndex.Clear();
+            _trackedDiskSize = 0;
+            _diskIndexInitialized = true;
+        }
+
         return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public void TrimMemory(double percentage = 1.0)
+    {
+        if (_memoryCache is MemoryCache concreteMemoryCache)
+        {
+            concreteMemoryCache.Compact(Math.Clamp(percentage, 0, 1));
+        }
     }
 
     private void SetMemoryEntry(string cacheKey, byte[] data, TimeSpan duration)
@@ -156,7 +172,15 @@ public sealed class ImageCache : IImageCache, IDisposable
             Size = data.LongLength
         };
 
-        _memoryCache.Set(cacheKey, data, options);
+        try
+        {
+            _memoryCache.Set(cacheKey, data, options);
+        }
+        catch (OutOfMemoryException)
+        {
+            TrimMemory(1.0);
+            _memoryCache.Set(cacheKey, data, options);
+        }
     }
 
     private static bool UsesMemory(ImageCachePolicy policy)
@@ -268,7 +292,8 @@ public sealed class ImageCache : IImageCache, IDisposable
                 TryDeleteFile(expiryTempPath);
             }
 
-            EnforceDiskSizeBudget();
+            TrackWrittenDiskEntry(cacheKey, dataPath);
+            EvictUntilUnderBudget();
         }
         catch (IOException)
         {
@@ -280,37 +305,68 @@ public sealed class ImageCache : IImageCache, IDisposable
         }
     }
 
-    private void EnforceDiskSizeBudget()
+    private void TrackWrittenDiskEntry(string cacheKey, string dataPath)
+    {
+        FileInfo written = new(dataPath);
+        long length = written.Exists ? written.Length : 0;
+        DateTime lastWrite = written.Exists ? written.LastWriteTimeUtc : _timeProvider.GetUtcNow().UtcDateTime;
+
+        lock (_diskEvictionLock)
+        {
+            EnsureDiskIndexLocked();
+
+            if (_diskIndex.TryGetValue(cacheKey, out DiskIndexEntry? existing))
+            {
+                _trackedDiskSize -= existing.Length;
+                existing.Length = length;
+                existing.LastWriteTimeUtc = lastWrite;
+                _trackedDiskSize += length;
+            }
+            else
+            {
+                _diskIndex[cacheKey] = new DiskIndexEntry
+                {
+                    CacheKey = cacheKey,
+                    Length = length,
+                    LastWriteTimeUtc = lastWrite
+                };
+                _trackedDiskSize += length;
+            }
+
+            if (_trackedDiskSize < 0)
+            {
+                _trackedDiskSize = 0;
+            }
+        }
+    }
+
+    private void EvictUntilUnderBudget()
     {
         lock (_diskEvictionLock)
         {
             try
             {
-                if (!Directory.Exists(_diskCacheDirectory))
+                EnsureDiskIndexLocked();
+
+                if (_trackedDiskSize <= _maxDiskCacheSizeBytes)
                 {
                     return;
                 }
 
-                List<FileInfo> dataFiles = Directory
-                    .EnumerateFiles(_diskCacheDirectory, "*" + DataFileExtension)
-                    .Select(path => new FileInfo(path))
-                    .Where(info => info.Exists && IsDataFile(info.Name))
-                    .OrderBy(info => info.LastWriteTimeUtc)
+                List<DiskIndexEntry> oldestFirst = _diskIndex.Values
+                    .OrderBy(entry => entry.LastWriteTimeUtc)
                     .ToList();
 
-                long totalSize = dataFiles.Sum(info => info.Length);
-
-                foreach (FileInfo file in dataFiles)
+                foreach (DiskIndexEntry entry in oldestFirst)
                 {
-                    if (totalSize <= _maxDiskCacheSizeBytes)
+                    if (_trackedDiskSize <= _maxDiskCacheSizeBytes)
                     {
                         break;
                     }
 
-                    string cacheKey = Path.GetFileNameWithoutExtension(file.Name);
-                    long length = file.Length;
-                    DeleteDiskEntry(file.FullName, GetExpiryFilePath(cacheKey));
-                    totalSize -= length;
+                    TryDeleteFile(GetDataFilePath(entry.CacheKey));
+                    TryDeleteFile(GetExpiryFilePath(entry.CacheKey));
+                    RemoveFromIndexLocked(entry.CacheKey);
                 }
             }
             catch (IOException)
@@ -324,16 +380,87 @@ public sealed class ImageCache : IImageCache, IDisposable
         }
     }
 
+    private void EnsureDiskIndexLocked()
+    {
+        if (_diskIndexInitialized)
+        {
+            return;
+        }
+
+        _diskIndex.Clear();
+        _trackedDiskSize = 0;
+
+        try
+        {
+            if (Directory.Exists(_diskCacheDirectory))
+            {
+                foreach (FileInfo info in Directory
+                    .EnumerateFiles(_diskCacheDirectory, "*" + DataFileExtension)
+                    .Select(path => new FileInfo(path))
+                    .Where(file => file.Exists && IsDataFile(file.Name)))
+                {
+                    string cacheKey = Path.GetFileNameWithoutExtension(info.Name);
+                    _diskIndex[cacheKey] = new DiskIndexEntry
+                    {
+                        CacheKey = cacheKey,
+                        Length = info.Length,
+                        LastWriteTimeUtc = info.LastWriteTimeUtc
+                    };
+                    _trackedDiskSize += info.Length;
+                }
+            }
+        }
+        catch (IOException)
+        {
+            // Index will rebuild on the next write.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Index will rebuild on the next write.
+        }
+
+        _diskIndexInitialized = true;
+    }
+
+    private void RemoveFromIndexLocked(string cacheKey)
+    {
+        if (_diskIndexInitialized && _diskIndex.Remove(cacheKey, out DiskIndexEntry? entry))
+        {
+            _trackedDiskSize -= entry.Length;
+
+            if (_trackedDiskSize < 0)
+            {
+                _trackedDiskSize = 0;
+            }
+        }
+    }
+
     private static bool IsDataFile(string fileName)
     {
         // Real data files are "{sha256}.bin" (64 hex chars). Temp names contain extra dots.
         return fileName.EndsWith(DataFileExtension, StringComparison.OrdinalIgnoreCase)
             && fileName.Length == 64 + DataFileExtension.Length;
     }
-    private static void DeleteDiskEntry(string dataPath, string expiryPath)
+
+    private void DeleteDiskEntry(string dataPath, string expiryPath)
     {
         TryDeleteFile(dataPath);
         TryDeleteFile(expiryPath);
+
+        string cacheKey = Path.GetFileNameWithoutExtension(dataPath);
+        lock (_diskEvictionLock)
+        {
+            RemoveFromIndexLocked(cacheKey);
+        }
+    }
+
+    private sealed class DiskIndexEntry
+    {
+        public required string CacheKey { get; init; }
+
+        public long Length { get; set; }
+
+        public DateTime LastWriteTimeUtc { get; set; }
     }
 
     private static void TryDeleteFile(string path)

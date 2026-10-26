@@ -25,4 +25,14 @@ public interface IImageCache
     /// Clears all memory and disk cache entries managed by this instance.
     /// </summary>
     Task ClearAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Evicts in-memory cache entries to reduce process memory. Disk entries are left unchanged.
+    /// </summary>
+    /// <param name="percentage">
+    /// Compact fraction in the range 0–1. <c>1.0</c> removes all in-memory entries.
+    /// </param>
+    void TrimMemory(double percentage = 1.0)
+    {
+    }
 }

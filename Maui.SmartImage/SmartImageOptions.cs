@@ -22,6 +22,11 @@ public sealed class SmartImageOptions
     public const long DefaultMaxImageSizeBytesValue = 15L * 1024 * 1024;
 
     /// <summary>
+    /// Default number of remote downloads that may run at the same time.
+    /// </summary>
+    public const int DefaultMaxConcurrentDownloads = 4;
+
+    /// <summary>
     /// Factory for the primary <see cref="HttpMessageHandler"/> used for remote image downloads.
     /// Override this to inject dev-certificate trust, a proxy, or any other transport-level behavior
     /// your app needs. Defaults to a plain <see cref="HttpClientHandler"/>.
@@ -62,4 +67,11 @@ public sealed class SmartImageOptions
     /// Root directory for the disk cache tier. Defaults to <c>FileSystem.CacheDirectory/maui_smart_image_cache</c>.
     /// </summary>
     public string? DiskCacheDirectory { get; set; }
+
+    /// <summary>
+    /// Maximum number of remote HTTP downloads that may run at the same time.
+    /// Extra requests wait for a slot, and unused downloads are cancelled when the last waiter
+    /// (for example a recycled CollectionView cell) lets go. Defaults to 4.
+    /// </summary>
+    public int MaxConcurrentDownloads { get; set; } = DefaultMaxConcurrentDownloads;
 }

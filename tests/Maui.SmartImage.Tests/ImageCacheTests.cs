@@ -252,6 +252,34 @@ public class ImageCacheTests : IDisposable
         Path.GetFileNameWithoutExtension(files[0]).Should().MatchRegex("^[0-9a-f]+$");
     }
 
+    [Fact]
+    public async Task TrimMemory_RemovesMemoryEntriesButLeavesDisk()
+    {
+        await _cache.SetAsync("key", ValidPngBytes, ImageCachePolicy.MemoryAndDisk, null, CancellationToken.None);
+
+        _cache.TrimMemory(1.0);
+
+        (await _cache.TryGetAsync("key", ImageCachePolicy.Memory, CancellationToken.None)).Should().BeNull();
+        (await _cache.TryGetAsync("key", ImageCachePolicy.Disk, CancellationToken.None)).Should().BeEquivalentTo(ValidPngBytes);
+    }
+
+    [Fact]
+    public async Task SetAsync_WhenOverwritingExistingDiskKey_DoesNotDoubleCountBudget()
+    {
+        ImageCache smallCache = new(
+            _memoryCache,
+            _diskCacheDirectory,
+            _timeProvider,
+            defaultEntryDuration: TimeSpan.FromDays(1),
+            maxDiskCacheSizeBytes: ValidPngBytes.Length + 4);
+
+        await smallCache.SetAsync("same", ValidPngBytes, ImageCachePolicy.Disk, null, CancellationToken.None);
+        await smallCache.SetAsync("same", ValidPngBytes, ImageCachePolicy.Disk, null, CancellationToken.None);
+
+        Directory.GetFiles(_diskCacheDirectory, "*.bin").Should().HaveCount(1);
+        (await smallCache.TryGetAsync("same", ImageCachePolicy.Disk, CancellationToken.None)).Should().BeEquivalentTo(ValidPngBytes);
+    }
+
     private sealed class FakeTimeProvider(DateTimeOffset initialUtcNow) : TimeProvider
     {
         private DateTimeOffset _utcNow = initialUtcNow;
