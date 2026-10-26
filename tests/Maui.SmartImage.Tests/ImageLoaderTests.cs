@@ -460,6 +460,183 @@ public class ImageLoaderTests
         handler.CallCount.Should().Be(1);
     }
 
+    [Fact]
+    public async Task LoadAsync_WhenLastWaiterCancels_AbortsTheDownload()
+    {
+        TaskCompletionSource started = new();
+        TaskCompletionSource aborted = new();
+        FakeHttpMessageHandler handler = new(async (_, ct) =>
+        {
+            started.TrySetResult();
+
+            try
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                aborted.TrySetResult();
+                throw;
+            }
+
+            return SuccessResponse(ValidPngBytes);
+        });
+        ImageLoader loader = CreateLoader(handler);
+        ImageLoadRequest request = new() { Url = ImageUrl, EnableAutomaticRetry = false };
+
+        using CancellationTokenSource callerCts = new();
+        Task<ImageLoadResult> load = loader.LoadAsync(request, callerCts.Token);
+
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        callerCts.Cancel();
+
+        await FluentActions.Awaiting(() => load).Should().ThrowAsync<OperationCanceledException>();
+        await aborted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        handler.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task LoadAsync_WhenLastWaiterCancelsAfterDownloadCompleted_ReturnsSuccess()
+    {
+        TaskCompletionSource started = new();
+        TaskCompletionSource cached = new();
+        FakeHttpMessageHandler handler = new(async (_, _) =>
+        {
+            started.TrySetResult();
+            return SuccessResponse(ValidPngBytes);
+        });
+        _cache.SetAsync(
+                Arg.Any<string>(),
+                Arg.Any<byte[]>(),
+                Arg.Any<ImageCachePolicy>(),
+                Arg.Any<TimeSpan?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                cached.TrySetResult();
+                return Task.CompletedTask;
+            });
+
+        ImageLoader loader = CreateLoader(handler);
+        using CancellationTokenSource callerCts = new();
+        Task<ImageLoadResult> load = loader.LoadAsync(
+            new ImageLoadRequest { Url = ImageUrl, EnableAutomaticRetry = false },
+            callerCts.Token);
+
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await cached.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        callerCts.Cancel();
+
+        ImageLoadResult result = await load;
+        result.IsSuccess.Should().BeTrue();
+        result.ImageData.Should().BeEquivalentTo(ValidPngBytes);
+    }
+
+    [Fact]
+    public async Task LoadAsync_WithHttpClientFactory_CreatesClientPerDownload()
+    {
+        FakeHttpMessageHandler handler = new((_, _) => Task.FromResult(SuccessResponse(ValidPngBytes)));
+        IHttpClientFactory factory = Substitute.For<IHttpClientFactory>();
+        factory.CreateClient(Arg.Any<string>()).Returns(_ => new HttpClient(handler, disposeHandler: false));
+
+        ImageLoader loader = new(factory, _cache, new SmartImageOptions());
+
+        await loader.LoadAsync(
+            new ImageLoadRequest { Url = "https://example.com/a.jpg", EnableAutomaticRetry = false },
+            CancellationToken.None);
+        await loader.LoadAsync(
+            new ImageLoadRequest { Url = "https://example.com/b.jpg", EnableAutomaticRetry = false },
+            CancellationToken.None);
+
+        factory.Received(2).CreateClient(MauiAppBuilderExtensions.HttpClientName);
+        handler.CallCount.Should().Be(2);
+    }
+
+    [Fact]
+    public void MaxInFlightJoinAttempts_IsBounded()
+    {
+        ImageLoader.MaxInFlightJoinAttempts.Should().Be(16);
+    }
+
+    [Fact]
+    public async Task LoadAsync_RespectsMaxConcurrentDownloads()
+    {
+        int inFlight = 0;
+        int maxSeen = 0;
+        TaskCompletionSource gate = new();
+        FakeHttpMessageHandler handler = new(async (_, ct) =>
+        {
+            int now = Interlocked.Increment(ref inFlight);
+
+            int snapshot;
+            do
+            {
+                snapshot = maxSeen;
+            }
+            while (now > snapshot && Interlocked.CompareExchange(ref maxSeen, now, snapshot) != snapshot);
+
+            try
+            {
+                await gate.Task.WaitAsync(ct);
+                return SuccessResponse(ValidPngBytes);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref inFlight);
+            }
+        });
+
+        HttpClient httpClient = new(handler);
+        ImageLoader loader = new(
+            httpClient,
+            _cache,
+            new SmartImageOptions { MaxConcurrentDownloads = 2 });
+
+        Task<ImageLoadResult>[] loads = Enumerable.Range(0, 5)
+            .Select(i => loader.LoadAsync(
+                new ImageLoadRequest
+                {
+                    Url = $"https://example.com/{i}.jpg",
+                    EnableAutomaticRetry = false
+                },
+                CancellationToken.None))
+            .ToArray();
+
+        await Task.Delay(150);
+        maxSeen.Should().BeLessThanOrEqualTo(2);
+
+        gate.SetResult();
+        ImageLoadResult[] results = await Task.WhenAll(loads);
+        results.Should().AllSatisfy(r => r.IsSuccess.Should().BeTrue());
+    }
+
+    [Fact]
+    public async Task LoadAsync_WhenDeviceConstrained_DoesNotRetry()
+    {
+        FakeHttpMessageHandler handler = new((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        FakeDeviceResourceMonitor monitor = new() { IsConstrained = true };
+        HttpClient httpClient = new(handler);
+        ImageLoader loader = new(
+            httpClient,
+            _cache,
+            new SmartImageOptions(),
+            logger: null,
+            deviceResources: monitor);
+        ImageLoadRequest request = new()
+        {
+            Url = ImageUrl,
+            EnableAutomaticRetry = true,
+            MaxRetryCount = 2,
+            RetryDelay = TimeSpan.FromMilliseconds(1)
+        };
+
+        ImageLoadResult result = await loader.LoadAsync(request, CancellationToken.None);
+
+        result.ErrorKind.Should().Be(ImageLoadErrorKind.HttpError);
+        handler.CallCount.Should().Be(1);
+    }
+
     private ImageLoader CreateLoader(HttpMessageHandler handler)
     {
         HttpClient httpClient = new(handler);

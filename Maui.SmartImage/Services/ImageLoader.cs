@@ -11,26 +11,77 @@ namespace Maui.SmartImage.Services;
 /// </summary>
 public sealed class ImageLoader : IImageLoader
 {
-    private readonly HttpClient _httpClient;
+    internal const int MaxInFlightJoinAttempts = 16;
+
+    private readonly HttpClient? _httpClient;
+    private readonly IHttpClientFactory? _httpClientFactory;
     private readonly IImageCache _cache;
     private readonly SmartImageOptions _options;
     private readonly ILogger<ImageLoader> _logger;
-    private readonly ConcurrentDictionary<string, Lazy<Task<ImageLoadResult>>> _inFlightDownloads = new();
+    private readonly IDeviceResourceMonitor? _deviceResources;
+    private readonly SemaphoreSlim _downloadSlots;
+    private readonly ConcurrentDictionary<string, InFlightDownload> _inFlightDownloads = new();
     private readonly Random _jitter = new();
 
     /// <summary>
-    /// Creates a new image loader.
+    /// Creates a new image loader that uses a caller-owned <see cref="HttpClient"/> (unit tests).
     /// </summary>
     public ImageLoader(
         HttpClient httpClient,
         IImageCache cache,
         SmartImageOptions options,
         ILogger<ImageLoader>? logger = null)
+        : this(httpClient, httpClientFactory: null, cache, options, logger, deviceResources: null)
     {
+    }
+
+    internal ImageLoader(
+        HttpClient httpClient,
+        IImageCache cache,
+        SmartImageOptions options,
+        ILogger<ImageLoader>? logger,
+        IDeviceResourceMonitor? deviceResources)
+        : this(httpClient, httpClientFactory: null, cache, options, logger, deviceResources)
+    {
+    }
+
+    internal ImageLoader(
+        IHttpClientFactory httpClientFactory,
+        IImageCache cache,
+        SmartImageOptions options,
+        ILogger<ImageLoader>? logger = null,
+        IDeviceResourceMonitor? deviceResources = null)
+        : this(httpClient: null, httpClientFactory, cache, options, logger, deviceResources)
+    {
+    }
+
+    private ImageLoader(
+        HttpClient? httpClient,
+        IHttpClientFactory? httpClientFactory,
+        IImageCache cache,
+        SmartImageOptions options,
+        ILogger<ImageLoader>? logger,
+        IDeviceResourceMonitor? deviceResources)
+    {
+        if (httpClient is null && httpClientFactory is null)
+        {
+            throw new ArgumentException("An HttpClient or IHttpClientFactory is required.");
+        }
+
         _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _cache = cache;
         _options = options;
         _logger = logger ?? NullLogger<ImageLoader>.Instance;
+        _deviceResources = deviceResources;
+        _downloadSlots = new SemaphoreSlim(
+            Math.Max(1, options.MaxConcurrentDownloads),
+            Math.Max(1, options.MaxConcurrentDownloads));
+    }
+
+    private HttpClient GetHttpClient()
+    {
+        return _httpClient ?? _httpClientFactory!.CreateClient(MauiAppBuilderExtensions.HttpClientName);
     }
 
     /// <inheritdoc />
@@ -55,35 +106,118 @@ public sealed class ImageLoader : IImageLoader
 
         string inFlightKey = BuildInFlightKey(request);
 
-        Lazy<Task<ImageLoadResult>> lazyDownload = _inFlightDownloads.GetOrAdd(
-            inFlightKey,
-            _ => new Lazy<Task<ImageLoadResult>>(
-                () => DownloadWithRetryAsync(request, uri, cacheKey, inFlightKey),
-                LazyThreadSafetyMode.ExecutionAndPublication));
+        for (int joinAttempt = 0; joinAttempt < MaxInFlightJoinAttempts; joinAttempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
 
-        return await lazyDownload.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
+            InFlightDownload entry = _inFlightDownloads.GetOrAdd(inFlightKey, static _ => new InFlightDownload());
+            Task<ImageLoadResult>? downloadTask = null;
+            bool joined = false;
+
+            lock (entry.Gate)
+            {
+                if (entry.Removed)
+                {
+                    // Fall through and retry with a replacement entry.
+                }
+                else
+                {
+                    entry.WaiterCount++;
+                    joined = true;
+                    entry.Task ??= DownloadWithRetryAsync(request, uri, cacheKey, inFlightKey, entry);
+                    downloadTask = entry.Task;
+                }
+            }
+
+            if (!joined || downloadTask is null)
+            {
+                RemoveIfSame(inFlightKey, entry);
+                await Task.Yield();
+                continue;
+            }
+
+            try
+            {
+                return await downloadTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (downloadTask.IsCompletedSuccessfully)
+            {
+                return await downloadTask.ConfigureAwait(false);
+            }
+            finally
+            {
+                ReleaseWaiter(inFlightKey, entry);
+            }
+        }
+
+        return ImageLoadResult.Failure(
+            ImageLoadErrorKind.Unknown,
+            "Unable to join the in-flight download.");
+    }
+
+    private void ReleaseWaiter(string inFlightKey, InFlightDownload entry)
+    {
+        lock (entry.Gate)
+        {
+            entry.WaiterCount--;
+
+            if (entry.WaiterCount > 0 || entry.Task is null || entry.Task.IsCompleted)
+            {
+                return;
+            }
+
+            entry.Removed = true;
+
+            try
+            {
+                entry.Cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Download already finished and disposed the token source.
+            }
+        }
+
+        RemoveIfSame(inFlightKey, entry);
+    }
+
+    private void RemoveIfSame(string inFlightKey, InFlightDownload entry)
+    {
+        ((ICollection<KeyValuePair<string, InFlightDownload>>)_inFlightDownloads)
+            .Remove(new KeyValuePair<string, InFlightDownload>(inFlightKey, entry));
     }
 
     private async Task<ImageLoadResult> DownloadWithRetryAsync(
         ImageLoadRequest request,
         Uri uri,
         string cacheKey,
-        string inFlightKey)
+        string inFlightKey,
+        InFlightDownload entry)
     {
         try
         {
-            int maxAttempts = request.EnableAutomaticRetry ? Math.Max(1, request.MaxRetryCount + 1) : 1;
+            bool constrained = _deviceResources?.IsConstrained == true;
+            int maxAttempts = request.EnableAutomaticRetry && !constrained
+                ? Math.Max(1, request.MaxRetryCount + 1)
+                : 1;
             TimeSpan perAttemptTimeout = request.Timeout ?? _options.DefaultTimeout;
-            TimeSpan overallBudget = CalculateOverallBudget(perAttemptTimeout, request.RetryDelay, maxAttempts);
+            TimeSpan overallBudget = constrained
+                ? perAttemptTimeout
+                : CalculateOverallBudget(perAttemptTimeout, request.RetryDelay, maxAttempts);
 
-            using CancellationTokenSource overallCts = new(overallBudget);
+            using CancellationTokenSource overallCts = CancellationTokenSource.CreateLinkedTokenSource(entry.Cts.Token);
+            overallCts.CancelAfter(overallBudget);
             ImageLoadResult lastResult = ImageLoadResult.Failure(ImageLoadErrorKind.Unknown);
 
             for (int attempt = 0; attempt < maxAttempts; attempt++)
             {
                 if (overallCts.IsCancellationRequested)
                 {
-                    return ImageLoadResult.Failure(ImageLoadErrorKind.Timeout, "Overall download budget exceeded.");
+                    return ImageLoadResult.Failure(
+                        ImageLoadErrorKind.Timeout,
+                        entry.Cts.IsCancellationRequested
+                            ? "Download cancelled because no callers remain."
+                            : "Overall download budget exceeded.");
                 }
 
                 if (attempt > 0)
@@ -96,11 +230,30 @@ public sealed class ImageLoader : IImageLoader
                     }
                     catch (OperationCanceledException)
                     {
-                        return ImageLoadResult.Failure(ImageLoadErrorKind.Timeout, "Overall download budget exceeded during retry delay.");
+                        return ImageLoadResult.Failure(
+                            ImageLoadErrorKind.Timeout,
+                            entry.Cts.IsCancellationRequested
+                                ? "Download cancelled because no callers remain."
+                                : "Overall download budget exceeded during retry delay.");
                     }
                 }
 
-                lastResult = await DownloadOnceAsync(request, uri, perAttemptTimeout, overallCts.Token).ConfigureAwait(false);
+                await _downloadSlots.WaitAsync(overallCts.Token).ConfigureAwait(false);
+
+                try
+                {
+                    lastResult = await DownloadOnceAsync(request, uri, perAttemptTimeout, overallCts.Token)
+                        .ConfigureAwait(false);
+                }
+                catch (OutOfMemoryException)
+                {
+                    _cache.TrimMemory(1.0);
+                    return ImageLoadResult.Failure(ImageLoadErrorKind.Unknown, "The process is out of memory.");
+                }
+                finally
+                {
+                    _downloadSlots.Release();
+                }
 
                 if (lastResult.IsSuccess)
                 {
@@ -138,9 +291,28 @@ public sealed class ImageLoader : IImageLoader
 
             return lastResult;
         }
+        catch (OperationCanceledException)
+        {
+            return ImageLoadResult.Failure(
+                ImageLoadErrorKind.Timeout,
+                entry.Cts.IsCancellationRequested
+                    ? "Download cancelled because no callers remain."
+                    : "Overall download budget exceeded.");
+        }
+        catch (OutOfMemoryException)
+        {
+            _cache.TrimMemory(1.0);
+            return ImageLoadResult.Failure(ImageLoadErrorKind.Unknown, "The process is out of memory.");
+        }
         finally
         {
-            _inFlightDownloads.TryRemove(inFlightKey, out _);
+            lock (entry.Gate)
+            {
+                entry.Removed = true;
+            }
+
+            RemoveIfSame(inFlightKey, entry);
+            entry.Cts.Dispose();
         }
     }
 
@@ -197,7 +369,7 @@ public sealed class ImageLoader : IImageLoader
 
         try
         {
-            using HttpResponseMessage response = await _httpClient
+            using HttpResponseMessage response = await GetHttpClient()
                 .GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token)
                 .ConfigureAwait(false);
 
@@ -230,6 +402,11 @@ public sealed class ImageLoader : IImageLoader
             }
 
             return ImageLoadResult.Success(data);
+        }
+        catch (OutOfMemoryException)
+        {
+            _cache.TrimMemory(1.0);
+            return ImageLoadResult.Failure(ImageLoadErrorKind.Unknown, "The process is out of memory.");
         }
         catch (OperationCanceledException) when (overallToken.IsCancellationRequested)
         {
@@ -304,5 +481,18 @@ public sealed class ImageLoader : IImageLoader
         return statusCode is (int)HttpStatusCode.RequestTimeout
             or (int)HttpStatusCode.TooManyRequests
             or >= 500 and < 600;
+    }
+
+    private sealed class InFlightDownload
+    {
+        public object Gate { get; } = new();
+
+        public CancellationTokenSource Cts { get; } = new();
+
+        public int WaiterCount;
+
+        public Task<ImageLoadResult>? Task;
+
+        public bool Removed;
     }
 }

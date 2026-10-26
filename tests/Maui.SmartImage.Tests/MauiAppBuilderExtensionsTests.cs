@@ -56,4 +56,30 @@ public class MauiAppBuilderExtensionsTests : IDisposable
 
         first.Should().BeSameAs(second);
     }
+
+    [Fact]
+    public void UseSmartImage_RegistersSingletonLoaderInstance()
+    {
+        MauiAppBuilder builder = MauiApp.CreateBuilder();
+        builder.UseSmartImage(options => options.DiskCacheDirectory = _diskCacheDirectory);
+
+        using MauiApp app = builder.Build();
+
+        IImageLoader first = app.Services.GetRequiredService<IImageLoader>();
+        IImageLoader second = app.Services.GetRequiredService<IImageLoader>();
+
+        first.Should().BeSameAs(second);
+    }
+
+    [Fact]
+    public void UseSmartImage_RegistersDeviceResourceMonitor()
+    {
+        MauiAppBuilder builder = MauiApp.CreateBuilder();
+        builder.UseSmartImage(options => options.DiskCacheDirectory = _diskCacheDirectory);
+
+        using MauiApp app = builder.Build();
+
+        IDeviceResourceMonitor monitor = app.Services.GetRequiredService<IDeviceResourceMonitor>();
+        monitor.Should().NotBeNull().And.BeOfType<DeviceResourceMonitor>();
+    }
 }
